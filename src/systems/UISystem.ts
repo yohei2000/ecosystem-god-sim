@@ -20,10 +20,11 @@ export class UISystem {
   private readonly grassMetric = this.requireElement('grassMetric');
   private readonly herbivoreMetric = this.requireElement('herbivoreMetric');
   private readonly carnivoreMetric = this.requireElement('carnivoreMetric');
+  private readonly mixedMetric = this.requireElement('mixedMetric');
+  private readonly diversityMetric = this.requireElement('diversityMetric');
   private readonly stabilityMetric = this.requireElement('stabilityMetric');
   private readonly seasonMetric = this.requireElement('seasonMetric');
   private readonly weatherMetric = this.requireElement('weatherMetric');
-  private readonly soilMetric = this.requireElement('soilMetric');
   private readonly riskMetric = this.requireElement('riskMetric');
   private readonly eventLog = this.requireElement('eventLog');
   private readonly buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.power-button'));
@@ -46,13 +47,15 @@ export class UISystem {
     this.grassMetric.textContent = Math.round(stats.grass).toString();
     this.herbivoreMetric.textContent = stats.herbivores.toString();
     this.carnivoreMetric.textContent = stats.carnivores.toString();
+    this.mixedMetric.textContent = `${stats.omnivores}/${stats.scavengers}`;
+    this.diversityMetric.textContent = `${Math.round(stats.speciesDiversity * 7)}/7`;
     this.stabilityMetric.textContent = `${stats.stability}%`;
     this.seasonMetric.textContent = seasonLabel[stats.season];
     this.weatherMetric.textContent = weatherLabel[stats.weather];
-    this.soilMetric.textContent = `${Math.round(stats.fertility * 100)}%`;
     this.riskMetric.textContent = `${stats.corpses}/${stats.sick}`;
 
     this.stabilityMetric.classList.toggle('danger', stats.stability < 35);
+    this.diversityMetric.classList.toggle('danger', stats.speciesDiversity < 0.58);
     this.riskMetric.classList.toggle('danger', stats.sick > 8 || stats.corpses > 22);
     this.weatherMetric.classList.toggle('danger', stats.weather === 'heatwave' || stats.weather === 'drought' || stats.weather === 'ashfall');
   }

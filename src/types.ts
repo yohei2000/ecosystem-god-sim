@@ -31,13 +31,26 @@ export interface GridPosition {
   y: number;
 }
 
-export type CreatureKind = 'herbivore' | 'carnivore';
+export type CreatureKind = 'herbivore' | 'carnivore' | 'omnivore' | 'scavenger';
 
-export type CreatureState = 'foraging' | 'grazing' | 'fleeing' | 'hunting' | 'scavenging' | 'mating' | 'starving' | 'sick';
+export type CreatureSpecies = 'hare' | 'deer' | 'boar' | 'wolf' | 'fox' | 'bear' | 'vulture';
+
+export type CreatureState =
+  | 'foraging'
+  | 'grazing'
+  | 'browsing'
+  | 'rooting'
+  | 'fleeing'
+  | 'hunting'
+  | 'scavenging'
+  | 'mating'
+  | 'starving'
+  | 'sick';
 
 export interface Creature extends GridPosition {
   id: number;
   kind: CreatureKind;
+  species: CreatureSpecies;
   energy: number;
   age: number;
   moveCooldown: number;
@@ -51,6 +64,7 @@ export interface Creature extends GridPosition {
 export interface CreatureEvent extends GridPosition {
   type: 'birth' | 'death' | 'hunt' | 'scavenge' | 'outbreak' | 'recovery';
   kind?: CreatureKind;
+  species?: CreatureSpecies;
   detail?: string;
 }
 
@@ -64,6 +78,9 @@ export interface EcosystemStats {
   grass: number;
   herbivores: number;
   carnivores: number;
+  omnivores: number;
+  scavengers: number;
+  speciesDiversity: number;
   corpses: number;
   sick: number;
   pressure: number;

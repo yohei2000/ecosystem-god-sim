@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import type { Cell, CreatureEvent, CreatureKind, GodPower, GridPosition, Season, Terrain, Weather } from '../types';
+import type { Cell, CreatureEvent, CreatureSpecies, GodPower, GridPosition, Season, Terrain, Weather } from '../types';
 import terrainStampsUrl from '../assets/terrain-stamps.png';
 import creatureAtlasUrl from '../assets/creature-atlas.png';
 import { CreatureSystem } from '../systems/CreatureSystem';
@@ -71,6 +71,26 @@ const weatherTint: Record<Weather, { color: number; alpha: number }> = {
   ashfall: { color: 0x9d9387, alpha: 0.18 },
 };
 
+const speciesLabel: Record<CreatureSpecies, string> = {
+  hare: 'ノウサギ',
+  deer: 'シカ',
+  boar: 'イノシシ',
+  wolf: 'オオカミ',
+  fox: 'キツネ',
+  bear: 'クマ',
+  vulture: 'ハゲワシ',
+};
+
+const speciesVisual: Record<CreatureSpecies, { frameOffset: number; size: number; gait: number; tint: number }> = {
+  hare: { frameOffset: 0, size: 3.25, gait: 12.8, tint: 0xe0b06c },
+  deer: { frameOffset: 0, size: 4.45, gait: 8.2, tint: 0xc9975b },
+  boar: { frameOffset: 0, size: 4.75, gait: 7.4, tint: 0x7a5741 },
+  wolf: { frameOffset: CREATURE_MOTION_FRAMES, size: 4.75, gait: 10.4, tint: 0x5d5e58 },
+  fox: { frameOffset: CREATURE_MOTION_FRAMES, size: 3.65, gait: 12.2, tint: 0xd87937 },
+  bear: { frameOffset: CREATURE_MOTION_FRAMES, size: 5.9, gait: 6.6, tint: 0x5b3e2f },
+  vulture: { frameOffset: CREATURE_MOTION_FRAMES, size: 3.55, gait: 9.4, tint: 0x2f2b27 },
+};
+
 export class WorldScene extends Phaser.Scene {
   private environment!: EnvironmentSystem;
   private plants!: PlantSystem;
@@ -88,10 +108,7 @@ export class WorldScene extends Phaser.Scene {
   private mapOffsetY = 0;
   private statsTimer = 0;
   private eventLogTimer = 0;
-  private readonly birthLogCounts: Record<CreatureKind, number> = {
-    herbivore: 0,
-    carnivore: 0,
-  };
+  private readonly birthLogCounts = new Map<CreatureSpecies, number>();
   private readonly eventLogCounts = {
     hunt: 0,
     scavenge: 0,
@@ -268,8 +285,8 @@ export class WorldScene extends Phaser.Scene {
     for (const event of this.creatures.consumeEvents()) {
       switch (event.type) {
         case 'birth':
-          if (event.kind) {
-            this.birthLogCounts[event.kind] += 1;
+          if (event.species) {
+            this.birthLogCounts.set(event.species, (this.birthLogCounts.get(event.species) ?? 0) + 1);
           }
           this.playBirthEffect(event);
           break;
@@ -295,8 +312,11 @@ export class WorldScene extends Phaser.Scene {
 
     if (this.eventLogTimer >= 1.5) {
       const messages: string[] = [];
-      if (this.birthLogCounts.herbivore > 0) messages.push(`草食 +${this.birthLogCounts.herbivore}`);
-      if (this.birthLogCounts.carnivore > 0) messages.push(`肉食 +${this.birthLogCounts.carnivore}`);
+      for (const [species, count] of this.birthLogCounts) {
+        if (count > 0) {
+          messages.push(`${speciesLabel[species]} +${count}`);
+        }
+      }
       if (this.eventLogCounts.hunt > 0) messages.push(`捕食 ${this.eventLogCounts.hunt}`);
       if (this.eventLogCounts.scavenge > 0) messages.push(`腐肉漁り ${this.eventLogCounts.scavenge}`);
       if (this.eventLogCounts.outbreak > 0) messages.push(`疫病 ${this.eventLogCounts.outbreak}`);
@@ -304,8 +324,7 @@ export class WorldScene extends Phaser.Scene {
       if (messages.length > 0) {
         this.ui.addLog(messages.join(' / '));
       }
-      this.birthLogCounts.herbivore = 0;
-      this.birthLogCounts.carnivore = 0;
+      this.birthLogCounts.clear();
       this.eventLogCounts.hunt = 0;
       this.eventLogCounts.scavenge = 0;
       this.eventLogCounts.outbreak = 0;
@@ -421,7 +440,12 @@ export class WorldScene extends Phaser.Scene {
 
   private playBirthEffect(event: CreatureEvent): void {
     const center = this.gridToWorldCenter(event);
-    const color = event.kind === 'carnivore' ? 0xff715c : 0xffef83;
+    const color =
+      event.species && speciesVisual[event.species]
+        ? speciesVisual[event.species].tint
+        : event.kind === 'carnivore'
+          ? 0xff715c
+          : 0xffef83;
     this.addRing(center.x, center.y, this.cellSize * 0.55, color, 2, 620, 0, 2.8);
     this.burstParticles(center.x, center.y, 8, [color, 0xffffff], this.cellSize * 0.25, this.cellSize * 1.8, 620);
   }
@@ -676,18 +700,16 @@ export class WorldScene extends Phaser.Scene {
         }
       }
 
-      const spriteSize =
-        creature.kind === 'herbivore'
-          ? Math.max(24, this.cellSize * 4.2)
-          : Math.max(28, this.cellSize * 4.8);
+      const visualStyle = speciesVisual[creature.species] ?? speciesVisual.deer;
+      const spriteSize = Math.max(22, this.cellSize * visualStyle.size);
       const shadowWidth = Math.max(16, spriteSize * 0.82);
       const shadowHeight = Math.max(6, spriteSize * 0.28);
-      const gaitSpeed = creature.kind === 'herbivore' ? 8.2 : 10.4;
+      const gaitSpeed = visualStyle.gait;
       const isMoving = visual.movement > 0.08;
       const motionFrame = isMoving
         ? Math.floor((this.time.now * 0.001 * gaitSpeed + visual.bobSeed) % CREATURE_MOTION_FRAMES)
         : 0;
-      const frameOffset = creature.kind === 'herbivore' ? 0 : CREATURE_MOTION_FRAMES;
+      const frameOffset = visualStyle.frameOffset;
       const bob = Math.sin(this.time.now * 0.016 * gaitSpeed + visual.bobSeed) * Math.min(2.2, spriteSize * 0.055) * visual.movement;
       this.actorGraphics.fillStyle(0x10130f, creature.state === 'fleeing' ? 0.3 : 0.22);
       this.actorGraphics.fillEllipse(visual.x, visual.y + spriteSize * 0.18, shadowWidth, shadowHeight);
@@ -725,7 +747,7 @@ export class WorldScene extends Phaser.Scene {
       } else if (creature.stress > 0.7 || creature.energy < 0.24) {
         sprite.setTint(0xffc7a9);
       } else {
-        sprite.clearTint();
+        sprite.setTint(visualStyle.tint);
       }
       aliveIds.add(creature.id);
     }
