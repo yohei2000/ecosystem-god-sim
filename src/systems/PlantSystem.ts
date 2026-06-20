@@ -14,7 +14,8 @@ export class PlantSystem {
       }
 
       const growthPotential = cell.water * 0.5 + cell.nutrient * 0.5;
-      const terrainBonus = cell.terrain === 'forest' ? 1.25 : cell.terrain === 'wasteland' ? 0.45 : 1;
+      const terrainBonus =
+        cell.terrain === 'forest' ? 1.25 : cell.terrain === 'wasteland' ? 0.45 : cell.terrain === 'mountain' ? 0.22 : 1;
       const heatStress = Math.max(0, cell.heat - 0.45);
       const growth = growthPotential * terrainBonus * 0.105 * dt;
       const decay = (heatStress * 0.34 + cell.ash * 0.045) * dt;

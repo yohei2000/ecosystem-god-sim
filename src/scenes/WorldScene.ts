@@ -1,5 +1,7 @@
 import * as Phaser from 'phaser';
 import type { Cell, CreatureEvent, CreatureKind, GodPower, GridPosition, Terrain } from '../types';
+import terrainAtlasUrl from '../assets/terrain-atlas.png';
+import creatureAtlasUrl from '../assets/creature-atlas.png';
 import { CreatureSystem } from '../systems/CreatureSystem';
 import { EnvironmentSystem } from '../systems/EnvironmentSystem';
 import { GodPowerSystem } from '../systems/GodPowerSystem';
@@ -9,12 +11,13 @@ import { UISystem } from '../systems/UISystem';
 const GRID_WIDTH = 48;
 const GRID_HEIGHT = 32;
 
-const terrainColor: Record<Terrain, number> = {
-  grassland: 0x426c36,
-  forest: 0x1f4d2a,
-  water: 0x1f6f8f,
-  wasteland: 0x665740,
-  crater: 0x282725,
+const terrainFrame: Record<Terrain, number> = {
+  grassland: 0,
+  forest: 1,
+  water: 2,
+  wasteland: 3,
+  crater: 4,
+  mountain: 5,
 };
 
 export class WorldScene extends Phaser.Scene {
@@ -26,6 +29,8 @@ export class WorldScene extends Phaser.Scene {
   private terrainGraphics!: Phaser.GameObjects.Graphics;
   private actorGraphics!: Phaser.GameObjects.Graphics;
   private overlayGraphics!: Phaser.GameObjects.Graphics;
+  private readonly terrainSprites: Phaser.GameObjects.Image[] = [];
+  private readonly creatureSprites = new Map<number, Phaser.GameObjects.Image>();
   private cellSize = 12;
   private mapOffsetX = 0;
   private mapOffsetY = 0;
@@ -40,6 +45,11 @@ export class WorldScene extends Phaser.Scene {
     super('WorldScene');
   }
 
+  preload(): void {
+    this.load.spritesheet('terrain-tiles', terrainAtlasUrl, { frameWidth: 128, frameHeight: 128 });
+    this.load.spritesheet('creatures', creatureAtlasUrl, { frameWidth: 128, frameHeight: 128 });
+  }
+
   create(): void {
     this.environment = new EnvironmentSystem(GRID_WIDTH, GRID_HEIGHT);
     this.plants = new PlantSystem(this.environment);
@@ -50,9 +60,10 @@ export class WorldScene extends Phaser.Scene {
     this.terrainGraphics = this.add.graphics();
     this.actorGraphics = this.add.graphics();
     this.overlayGraphics = this.add.graphics();
-    this.terrainGraphics.setDepth(0);
+    this.terrainGraphics.setDepth(1);
     this.actorGraphics.setDepth(2);
-    this.overlayGraphics.setDepth(3);
+    this.overlayGraphics.setDepth(4);
+    this.createTerrainSprites();
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       const grid = this.pointerToGrid(pointer.x, pointer.y);
@@ -99,6 +110,50 @@ export class WorldScene extends Phaser.Scene {
     this.mapOffsetX = Math.floor((width - mapWidth) / 2);
     this.mapOffsetY = Math.floor(topReserve + (availableHeight - mapHeight) / 2);
     this.renderWorld();
+  }
+
+  private createTerrainSprites(): void {
+    for (let y = 0; y < this.environment.height; y += 1) {
+      for (let x = 0; x < this.environment.width; x += 1) {
+        const cell = this.environment.getCell(x, y);
+        const sprite = this.add.image(0, 0, 'terrain-tiles', cell ? this.getTerrainFrame(cell) : 0);
+        sprite.setOrigin(0, 0);
+        sprite.setDepth(0);
+        this.terrainSprites.push(sprite);
+      }
+    }
+    this.syncTerrainSprites();
+  }
+
+  private syncTerrainSprites(): void {
+    if (this.terrainSprites.length === 0 || !this.environment) {
+      return;
+    }
+
+    for (let y = 0; y < this.environment.height; y += 1) {
+      for (let x = 0; x < this.environment.width; x += 1) {
+        const index = y * this.environment.width + x;
+        const cell = this.environment.getCell(x, y);
+        const sprite = this.terrainSprites[index];
+        if (!cell || !sprite) {
+          continue;
+        }
+
+        sprite.setFrame(this.getTerrainFrame(cell));
+        sprite.setPosition(this.mapOffsetX + x * this.cellSize, this.mapOffsetY + y * this.cellSize);
+        sprite.setDisplaySize(this.cellSize, this.cellSize);
+      }
+    }
+  }
+
+  private getTerrainFrame(cell: Cell): number {
+    if (cell.terrain !== 'water' && cell.ash > 0.58) {
+      return 6;
+    }
+    if (cell.terrain === 'grassland' && cell.grass > 0.78 && cell.nutrient > 0.55) {
+      return 7;
+    }
+    return terrainFrame[cell.terrain];
   }
 
   private pointerToGrid(pointerX: number, pointerY: number): GridPosition | undefined {
@@ -400,6 +455,7 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
 
+    this.syncTerrainSprites();
     this.terrainGraphics.clear();
     this.actorGraphics.clear();
     this.overlayGraphics.clear();
@@ -422,19 +478,22 @@ export class WorldScene extends Phaser.Scene {
   private drawCell(cell: Cell, x: number, y: number): void {
     const px = this.mapOffsetX + x * this.cellSize;
     const py = this.mapOffsetY + y * this.cellSize;
-    const base = Phaser.Display.Color.ValueToColor(terrainColor[cell.terrain]);
-    const grassTint = Math.floor(70 * cell.grass);
-    const waterTint = Math.floor(55 * cell.water);
-    const heatTint = Math.floor(90 * cell.heat);
-    const ashTint = Math.floor(70 * cell.ash);
-    const color = Phaser.Display.Color.GetColor(
-      Math.min(255, base.red + heatTint + ashTint * 0.35),
-      Math.min(255, base.green + grassTint + cell.nutrient * 28),
-      Math.min(255, base.blue + waterTint + ashTint * 0.25),
-    );
+    const interior = Math.max(1, this.cellSize - 2);
 
-    this.terrainGraphics.fillStyle(color, 1);
-    this.terrainGraphics.fillRect(px, py, this.cellSize, this.cellSize);
+    if (cell.terrain !== 'water' && cell.terrain !== 'crater' && cell.terrain !== 'mountain' && cell.grass > 0.42) {
+      this.terrainGraphics.fillStyle(0xa7e961, Math.min(0.28, (cell.grass - 0.42) * 0.42));
+      this.terrainGraphics.fillRect(px + 1, py + 1, interior, interior);
+    }
+
+    if (cell.terrain !== 'water' && cell.water > 0.7) {
+      this.terrainGraphics.fillStyle(0x6fc7e8, Math.min(0.24, (cell.water - 0.7) * 0.7));
+      this.terrainGraphics.fillRect(px + 1, py + 1, interior, interior);
+    }
+
+    if (cell.nutrient > 0.78 && cell.terrain !== 'water') {
+      this.terrainGraphics.fillStyle(0xe8d86a, Math.min(0.16, (cell.nutrient - 0.78) * 0.45));
+      this.terrainGraphics.fillRect(px + 1, py + 1, interior, interior);
+    }
 
     if (cell.heat > 0.55) {
       this.terrainGraphics.fillStyle(0xff6b35, Math.min(0.42, cell.heat * 0.42));
@@ -443,27 +502,45 @@ export class WorldScene extends Phaser.Scene {
 
     if (cell.ash > 0.32) {
       this.terrainGraphics.fillStyle(0xc9c0b1, Math.min(0.34, cell.ash * 0.34));
-      this.terrainGraphics.fillRect(px + 1, py + 1, Math.max(1, this.cellSize - 2), Math.max(1, this.cellSize - 2));
+      this.terrainGraphics.fillRect(px + 1, py + 1, interior, interior);
     }
   }
 
   private drawCreatures(): void {
-    const radius = Math.max(2, this.cellSize * 0.32);
+    const shadowWidth = Math.max(3, this.cellSize * 0.96);
+    const shadowHeight = Math.max(2, this.cellSize * 0.44);
+    const aliveIds = new Set<number>();
+
     for (const creature of this.creatures.creatures) {
       const cx = this.mapOffsetX + creature.x * this.cellSize + this.cellSize / 2;
       const cy = this.mapOffsetY + creature.y * this.cellSize + this.cellSize / 2;
-      if (creature.kind === 'herbivore') {
-        this.actorGraphics.fillStyle(0xf7e37a, 1);
-        this.actorGraphics.fillCircle(cx, cy, radius);
-        this.actorGraphics.fillStyle(0x7e8b3e, 1);
-        this.actorGraphics.fillCircle(cx - radius * 0.35, cy - radius * 0.15, radius * 0.35);
-        continue;
+      this.actorGraphics.fillStyle(0x10130f, 0.22);
+      this.actorGraphics.fillEllipse(cx, cy + this.cellSize * 0.2, shadowWidth, shadowHeight);
+
+      let sprite = this.creatureSprites.get(creature.id);
+      if (!sprite) {
+        sprite = this.add.image(cx, cy, 'creatures', creature.kind === 'herbivore' ? 0 : 1);
+        sprite.setDepth(3);
+        this.creatureSprites.set(creature.id, sprite);
       }
 
-      this.actorGraphics.fillStyle(0xd5533d, 1);
-      this.actorGraphics.fillTriangle(cx, cy - radius, cx - radius, cy + radius, cx + radius, cy + radius);
-      this.actorGraphics.fillStyle(0x491a18, 1);
-      this.actorGraphics.fillCircle(cx, cy + radius * 0.25, radius * 0.32);
+      sprite.setFrame(creature.kind === 'herbivore' ? 0 : 1);
+      sprite.setPosition(cx, cy);
+      sprite.setDisplaySize(this.cellSize * 1.45, this.cellSize * 1.45);
+      sprite.setAlpha(Phaser.Math.Clamp(0.54 + creature.energy * 0.34, 0.52, 1));
+      if (creature.energy < 0.24) {
+        sprite.setTint(0xffc7a9);
+      } else {
+        sprite.clearTint();
+      }
+      aliveIds.add(creature.id);
+    }
+
+    for (const [id, sprite] of this.creatureSprites) {
+      if (!aliveIds.has(id)) {
+        sprite.destroy();
+        this.creatureSprites.delete(id);
+      }
     }
   }
 

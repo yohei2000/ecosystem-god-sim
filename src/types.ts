@@ -1,4 +1,4 @@
-export type Terrain = 'grassland' | 'forest' | 'water' | 'wasteland' | 'crater';
+export type Terrain = 'grassland' | 'forest' | 'water' | 'wasteland' | 'crater' | 'mountain';
 
 export type GodPower = 'meteor' | 'rain' | 'sun' | 'seed';
 

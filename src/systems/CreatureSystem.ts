@@ -26,7 +26,13 @@ export class CreatureSystem {
       creature.reproductionCooldown = Math.max(0, creature.reproductionCooldown - dt);
 
       const cell = this.environment.getCell(creature.x, creature.y);
-      if (!cell || cell.terrain === 'water' || cell.terrain === 'crater' || cell.heat > 0.93) {
+      if (
+        !cell ||
+        cell.terrain === 'water' ||
+        cell.terrain === 'crater' ||
+        cell.terrain === 'mountain' ||
+        cell.heat > 0.93
+      ) {
         creature.energy -= 0.22 * dt;
       }
 
@@ -264,7 +270,7 @@ export class CreatureSystem {
 
   private isWalkable(x: number, y: number): boolean {
     const cell = this.environment.getCell(x, y);
-    return Boolean(cell && cell.terrain !== 'water' && cell.terrain !== 'crater');
+    return Boolean(cell && cell.terrain !== 'water' && cell.terrain !== 'crater' && cell.terrain !== 'mountain');
   }
 
   private spawnInitialPopulation(): void {

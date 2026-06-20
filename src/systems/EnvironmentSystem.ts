@@ -37,8 +37,15 @@ export class EnvironmentSystem {
         cell.nutrient = clamp01(cell.nutrient + converted * 0.8);
       }
 
-      const waterRetention = cell.terrain === 'forest' ? 0.007 : cell.terrain === 'water' ? -0.05 : 0.018;
-      const heatLoss = cell.terrain === 'water' ? 0.08 : 0.045;
+      const waterRetention =
+        cell.terrain === 'forest'
+          ? 0.007
+          : cell.terrain === 'water'
+            ? -0.05
+            : cell.terrain === 'mountain'
+              ? 0.012
+              : 0.018;
+      const heatLoss = cell.terrain === 'water' ? 0.08 : cell.terrain === 'mountain' ? 0.058 : 0.045;
 
       cell.water = clamp01(cell.water - waterRetention * dt);
       cell.heat = clamp01(cell.heat - heatLoss * dt);
@@ -70,7 +77,7 @@ export class EnvironmentSystem {
 
   addSeeds(center: GridPosition, radius: number): void {
     this.forEachInRadius(center, radius, (cell, distance) => {
-      if (cell.terrain !== 'water' && cell.terrain !== 'crater') {
+      if (cell.terrain !== 'water' && cell.terrain !== 'crater' && cell.terrain !== 'mountain') {
         const falloff = 1 - distance / (radius + 1);
         cell.grass = clamp01(cell.grass + 0.38 * falloff);
         cell.nutrient = clamp01(cell.nutrient - 0.08 * falloff);
@@ -128,11 +135,15 @@ export class EnvironmentSystem {
     const lake = Math.hypot(nx - 0.72, ny - 0.32) < 0.15 || Math.hypot(nx - 0.25, ny - 0.72) < 0.1;
     const crater = Math.hypot(nx - 0.52, ny - 0.55) < 0.09;
     const forestBand = Math.sin(x * 0.55) + Math.cos(y * 0.44) > 0.95;
+    const mountainRidge =
+      (nx > 0.56 && ny > 0.58 && Math.abs(ny - (0.7 + Math.sin(x * 0.3) * 0.08)) < 0.085) ||
+      (nx > 0.78 && ny < 0.24 && Math.abs(ny - (0.14 + Math.cos(x * 0.35) * 0.05)) < 0.06);
     const wasteland = nx < 0.22 && ny < 0.36;
 
     let terrain: Terrain = 'grassland';
     if (lake) terrain = 'water';
     else if (crater) terrain = 'crater';
+    else if (mountainRidge) terrain = 'mountain';
     else if (wasteland) terrain = 'wasteland';
     else if (forestBand) terrain = 'forest';
 
@@ -142,6 +153,7 @@ export class EnvironmentSystem {
       water: { terrain, grass: 0.04, water: 1, nutrient: 0.38, heat: 0.08, ash: 0 },
       wasteland: { terrain, grass: 0.14, water: 0.15, nutrient: 0.2, heat: 0.52, ash: 0.05 },
       crater: { terrain, grass: 0, water: 0.05, nutrient: 0.16, heat: 0.64, ash: 0.45 },
+      mountain: { terrain, grass: 0.08, water: 0.24, nutrient: 0.32, heat: 0.16, ash: 0.01 },
     };
 
     return { ...templates[terrain] };
