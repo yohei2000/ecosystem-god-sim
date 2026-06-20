@@ -10,12 +10,16 @@ import { UISystem } from '../systems/UISystem';
 
 const GRID_WIDTH = 122;
 const GRID_HEIGHT = 56;
+const TERRAIN_STAMP_FRAME_SIZE = 320;
+const CREATURE_FRAME_SIZE = 192;
+const CREATURE_MOTION_FRAMES = 4;
 
 interface CreatureVisual {
   x: number;
   y: number;
   rotation: number;
   bobSeed: number;
+  movement: number;
 }
 
 interface TerrainStampDefinition {
@@ -78,8 +82,14 @@ export class WorldScene extends Phaser.Scene {
   }
 
   preload(): void {
-    this.load.spritesheet('terrain-stamps', terrainStampsUrl, { frameWidth: 256, frameHeight: 256 });
-    this.load.spritesheet('creatures', creatureAtlasUrl, { frameWidth: 128, frameHeight: 128 });
+    this.load.spritesheet('terrain-stamps', terrainStampsUrl, {
+      frameWidth: TERRAIN_STAMP_FRAME_SIZE,
+      frameHeight: TERRAIN_STAMP_FRAME_SIZE,
+    });
+    this.load.spritesheet('creatures', creatureAtlasUrl, {
+      frameWidth: CREATURE_FRAME_SIZE,
+      frameHeight: CREATURE_FRAME_SIZE,
+    });
   }
 
   create(): void {
@@ -527,9 +537,6 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private drawCreatures(dt: number): void {
-    const spriteSize = Math.max(10, this.cellSize * 2.2);
-    const shadowWidth = Math.max(6, spriteSize * 0.72);
-    const shadowHeight = Math.max(3, spriteSize * 0.32);
     const follow = dt <= 0 ? 1 : 1 - Math.exp(-dt * 13);
     const aliveIds = new Set<number>();
 
@@ -542,39 +549,54 @@ export class WorldScene extends Phaser.Scene {
           y: target.y,
           rotation: 0,
           bobSeed: Phaser.Math.FloatBetween(0, Math.PI * 2),
+          movement: 0,
         };
         this.creatureVisuals.set(creature.id, visual);
       }
 
       const dx = target.x - visual.x;
       const dy = target.y - visual.y;
-      if (Math.hypot(dx, dy) > this.cellSize * 5) {
+      const distance = Math.hypot(dx, dy);
+      if (distance > this.cellSize * 5) {
         visual.x = target.x;
         visual.y = target.y;
       } else {
         visual.x = Phaser.Math.Linear(visual.x, target.x, follow);
         visual.y = Phaser.Math.Linear(visual.y, target.y, follow);
       }
-      if (Math.abs(dx) + Math.abs(dy) > 0.02) {
-        visual.rotation = Phaser.Math.Angle.RotateTo(visual.rotation, Math.atan2(dy, dx), dt <= 0 ? Math.PI : dt * 10);
+      visual.movement = Phaser.Math.Linear(visual.movement, Math.min(1, distance / Math.max(1, this.cellSize * 1.8)), dt <= 0 ? 1 : dt * 12);
+      if (distance > 0.02) {
+        visual.rotation = Phaser.Math.Angle.RotateTo(visual.rotation, Math.atan2(dy, dx), dt <= 0 ? Math.PI : dt * 12);
       }
 
-      const bob = Math.sin(this.time.now * 0.01 + visual.bobSeed) * Math.min(0.8, this.cellSize * 0.08);
+      const spriteSize =
+        creature.kind === 'herbivore'
+          ? Math.max(24, this.cellSize * 4.2)
+          : Math.max(28, this.cellSize * 4.8);
+      const shadowWidth = Math.max(16, spriteSize * 0.82);
+      const shadowHeight = Math.max(6, spriteSize * 0.28);
+      const gaitSpeed = creature.kind === 'herbivore' ? 8.2 : 10.4;
+      const isMoving = visual.movement > 0.08;
+      const motionFrame = isMoving
+        ? Math.floor((this.time.now * 0.001 * gaitSpeed + visual.bobSeed) % CREATURE_MOTION_FRAMES)
+        : 0;
+      const frameOffset = creature.kind === 'herbivore' ? 0 : CREATURE_MOTION_FRAMES;
+      const bob = Math.sin(this.time.now * 0.016 * gaitSpeed + visual.bobSeed) * Math.min(2.2, spriteSize * 0.055) * visual.movement;
       this.actorGraphics.fillStyle(0x10130f, 0.22);
       this.actorGraphics.fillEllipse(visual.x, visual.y + spriteSize * 0.18, shadowWidth, shadowHeight);
 
       let sprite = this.creatureSprites.get(creature.id);
       if (!sprite) {
-        sprite = this.add.image(visual.x, visual.y, 'creatures', creature.kind === 'herbivore' ? 0 : 1);
-        sprite.setDepth(3);
+        sprite = this.add.image(visual.x, visual.y, 'creatures', frameOffset + motionFrame);
+        sprite.setDepth(4);
         this.creatureSprites.set(creature.id, sprite);
       }
 
-      sprite.setFrame(creature.kind === 'herbivore' ? 0 : 1);
+      sprite.setFrame(frameOffset + motionFrame);
       sprite.setPosition(visual.x, visual.y + bob);
       sprite.setDisplaySize(spriteSize, spriteSize);
-      sprite.setRotation(visual.rotation * 0.18);
-      sprite.setAlpha(Phaser.Math.Clamp(0.54 + creature.energy * 0.34, 0.52, 1));
+      sprite.setRotation(visual.rotation);
+      sprite.setAlpha(Phaser.Math.Clamp(0.62 + creature.energy * 0.3, 0.58, 1));
       if (creature.energy < 0.24) {
         sprite.setTint(0xffc7a9);
       } else {
