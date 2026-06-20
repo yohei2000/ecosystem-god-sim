@@ -13,7 +13,7 @@ export class GodPowerSystem {
 
   setPower(power: GodPower): void {
     this.selectedPower = power;
-    this.log(`${this.labelFor(power)}を選択`);
+    this.log(`${this.labelFor(power)} を選択`);
   }
 
   applyAt(position: GridPosition): void {
@@ -25,21 +25,21 @@ export class GodPowerSystem {
       case 'meteor': {
         this.environment.applyMeteor(position, 3);
         const killed = this.creatures.killCreaturesInRadius(position, 7);
-        this.log(`隕石落下: ${killed}体が消滅`);
+        this.log(`隕石衝突: ${killed}体が消滅し、灰と毒性が広がる`);
         break;
       }
       case 'rain':
         this.environment.addWater(position, 9, 0.42);
-        this.log('雨が降り、水と冷却を付与');
+        this.log('豪雨: 水分が戻り、熱と毒性が薄まる');
         break;
       case 'sun':
         this.environment.addHeat(position, 8, 0.36);
-        this.log('太陽熱で周囲が乾燥');
+        this.log('太陽熱: 草は乾き、捕食者の圧が上がる');
         break;
       case 'seed':
         this.environment.addSeeds(position, 8);
-        this.creatures.addHerbivores(position, 2);
-        this.log('種と草食動物を追加');
+        this.creatures.addHerbivores(position, 3);
+        this.log('種まき: 草と菌床が広がり、草食動物が集まる');
         break;
     }
   }

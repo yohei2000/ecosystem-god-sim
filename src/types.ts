@@ -2,6 +2,19 @@ export type Terrain = 'grassland' | 'forest' | 'water' | 'wasteland' | 'crater' 
 
 export type GodPower = 'meteor' | 'rain' | 'sun' | 'seed';
 
+export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
+
+export type Weather = 'clear' | 'rain' | 'storm' | 'drought' | 'heatwave' | 'ashfall';
+
+export interface ClimateState {
+  season: Season;
+  weather: Weather;
+  seasonProgress: number;
+  weatherProgress: number;
+  temperature: number;
+  moisture: number;
+}
+
 export interface Cell {
   terrain: Terrain;
   grass: number;
@@ -9,6 +22,8 @@ export interface Cell {
   nutrient: number;
   heat: number;
   ash: number;
+  fungus: number;
+  toxicity: number;
 }
 
 export interface GridPosition {
@@ -18,6 +33,8 @@ export interface GridPosition {
 
 export type CreatureKind = 'herbivore' | 'carnivore';
 
+export type CreatureState = 'foraging' | 'grazing' | 'fleeing' | 'hunting' | 'scavenging' | 'mating' | 'starving' | 'sick';
+
 export interface Creature extends GridPosition {
   id: number;
   kind: CreatureKind;
@@ -25,11 +42,16 @@ export interface Creature extends GridPosition {
   age: number;
   moveCooldown: number;
   reproductionCooldown: number;
+  stress: number;
+  sickness: number;
+  state: CreatureState;
+  packId: number;
 }
 
 export interface CreatureEvent extends GridPosition {
-  type: 'birth';
-  kind: CreatureKind;
+  type: 'birth' | 'death' | 'hunt' | 'scavenge' | 'outbreak' | 'recovery';
+  kind?: CreatureKind;
+  detail?: string;
 }
 
 export interface Corpse extends GridPosition {
@@ -42,5 +64,11 @@ export interface EcosystemStats {
   grass: number;
   herbivores: number;
   carnivores: number;
+  corpses: number;
+  sick: number;
+  pressure: number;
+  fertility: number;
+  season: Season;
+  weather: Weather;
   stability: number;
 }

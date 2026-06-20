@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import type { Cell, CreatureEvent, CreatureKind, GodPower, GridPosition, Terrain } from '../types';
+import type { Cell, CreatureEvent, CreatureKind, GodPower, GridPosition, Season, Terrain, Weather } from '../types';
 import terrainStampsUrl from '../assets/terrain-stamps.png';
 import creatureAtlasUrl from '../assets/creature-atlas.png';
 import { CreatureSystem } from '../systems/CreatureSystem';
@@ -17,7 +17,6 @@ const CREATURE_MOTION_FRAMES = 4;
 interface CreatureVisual {
   x: number;
   y: number;
-  rotation: number;
   bobSeed: number;
   movement: number;
   facingLeft: boolean;
@@ -35,16 +34,16 @@ interface TerrainStampDefinition {
 }
 
 const TERRAIN_STAMPS: TerrainStampDefinition[] = [
-  { frame: 3, x: 0.12, y: 0.24, width: 0.24, height: 0.42, alpha: 0.96 },
-  { frame: 0, x: 0.18, y: 0.72, width: 0.22, height: 0.28, alpha: 0.96, angle: -8 },
-  { frame: 0, x: 0.36, y: 0.17, width: 0.18, height: 0.24, alpha: 0.92, flipX: true },
-  { frame: 0, x: 0.82, y: 0.2, width: 0.16, height: 0.22, alpha: 0.9, angle: 9 },
-  { frame: 2, x: 0.72, y: 0.33, width: 0.33, height: 0.33, alpha: 0.98 },
-  { frame: 2, x: 0.25, y: 0.74, width: 0.22, height: 0.23, alpha: 0.96 },
-  { frame: 4, x: 0.52, y: 0.56, width: 0.19, height: 0.22, alpha: 0.98 },
-  { frame: 1, x: 0.73, y: 0.74, width: 0.34, height: 0.28, alpha: 0.95, angle: 6 },
-  { frame: 1, x: 0.91, y: 0.53, width: 0.26, height: 0.22, alpha: 0.9, angle: -7, flipX: true },
-  { frame: 1, x: 0.88, y: 0.09, width: 0.2, height: 0.18, alpha: 0.86, angle: 4 },
+  { frame: 3, x: 0.12, y: 0.24, width: 0.24, height: 0.42, alpha: 0.94 },
+  { frame: 0, x: 0.18, y: 0.72, width: 0.23, height: 0.3, alpha: 0.96, angle: -8 },
+  { frame: 0, x: 0.36, y: 0.17, width: 0.19, height: 0.25, alpha: 0.92, flipX: true },
+  { frame: 0, x: 0.82, y: 0.2, width: 0.17, height: 0.23, alpha: 0.9, angle: 9 },
+  { frame: 2, x: 0.72, y: 0.33, width: 0.34, height: 0.34, alpha: 0.98 },
+  { frame: 2, x: 0.25, y: 0.74, width: 0.24, height: 0.24, alpha: 0.96 },
+  { frame: 4, x: 0.52, y: 0.56, width: 0.2, height: 0.23, alpha: 0.98 },
+  { frame: 1, x: 0.73, y: 0.74, width: 0.35, height: 0.29, alpha: 0.95, angle: 6 },
+  { frame: 1, x: 0.91, y: 0.53, width: 0.27, height: 0.23, alpha: 0.9, angle: -7, flipX: true },
+  { frame: 1, x: 0.88, y: 0.09, width: 0.21, height: 0.19, alpha: 0.86, angle: 4 },
 ];
 
 const terrainColor: Record<Terrain, number> = {
@@ -54,6 +53,22 @@ const terrainColor: Record<Terrain, number> = {
   wasteland: 0x76634a,
   crater: 0x2f2d2a,
   mountain: 0x656f6c,
+};
+
+const baseSeasonColor: Record<Season, number> = {
+  spring: 0x69ad4d,
+  summer: 0x5e9f43,
+  autumn: 0x78924a,
+  winter: 0x7d946f,
+};
+
+const weatherTint: Record<Weather, { color: number; alpha: number }> = {
+  clear: { color: 0xffffff, alpha: 0 },
+  rain: { color: 0x79bfff, alpha: 0.08 },
+  storm: { color: 0x3c4a64, alpha: 0.18 },
+  drought: { color: 0xd5a765, alpha: 0.12 },
+  heatwave: { color: 0xff8a3f, alpha: 0.16 },
+  ashfall: { color: 0x9d9387, alpha: 0.18 },
 };
 
 export class WorldScene extends Phaser.Scene {
@@ -72,10 +87,16 @@ export class WorldScene extends Phaser.Scene {
   private mapOffsetX = 0;
   private mapOffsetY = 0;
   private statsTimer = 0;
-  private birthLogTimer = 0;
+  private eventLogTimer = 0;
   private readonly birthLogCounts: Record<CreatureKind, number> = {
     herbivore: 0,
     carnivore: 0,
+  };
+  private readonly eventLogCounts = {
+    hunt: 0,
+    scavenge: 0,
+    outbreak: 0,
+    death: 0,
   };
 
   constructor() {
@@ -106,6 +127,7 @@ export class WorldScene extends Phaser.Scene {
     this.terrainGraphics.setDepth(0);
     this.overlayGraphics.setDepth(2);
     this.actorGraphics.setDepth(3);
+    this.createMirroredCreatureTexture();
     this.createTerrainStamps();
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -119,7 +141,7 @@ export class WorldScene extends Phaser.Scene {
 
     this.scale.on('resize', () => this.resizeMap());
     this.resizeMap();
-    this.ui.addLog('生態系が始動');
+    this.ui.addLog('生態系が始動: 季節と天候が巡り始める');
   }
 
   update(_: number, deltaMs: number): void {
@@ -165,6 +187,59 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
+  private createMirroredCreatureTexture(): void {
+    if (this.textures.exists('creatures-left')) {
+      return;
+    }
+
+    const source = this.textures.get('creatures').getSourceImage() as CanvasImageSource & {
+      width: number;
+      height: number;
+    };
+    const canvas = document.createElement('canvas');
+    canvas.width = source.width;
+    canvas.height = source.height;
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return;
+    }
+
+    const columns = Math.floor(source.width / CREATURE_FRAME_SIZE);
+    const rows = Math.floor(source.height / CREATURE_FRAME_SIZE);
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const frameX = column * CREATURE_FRAME_SIZE;
+        const frameY = row * CREATURE_FRAME_SIZE;
+        context.save();
+        context.translate(frameX + CREATURE_FRAME_SIZE, frameY);
+        context.scale(-1, 1);
+        context.drawImage(
+          source,
+          frameX,
+          frameY,
+          CREATURE_FRAME_SIZE,
+          CREATURE_FRAME_SIZE,
+          0,
+          0,
+          CREATURE_FRAME_SIZE,
+          CREATURE_FRAME_SIZE,
+        );
+        context.restore();
+      }
+    }
+
+    const mirroredTexture = this.textures.addCanvas('creatures-left', canvas);
+    if (!mirroredTexture) {
+      return;
+    }
+
+    this.textures.addSpriteSheet('', mirroredTexture, {
+      frameWidth: CREATURE_FRAME_SIZE,
+      frameHeight: CREATURE_FRAME_SIZE,
+    });
+  }
+
   private syncTerrainStamps(): void {
     const mapWidth = this.cellSize * GRID_WIDTH;
     const mapHeight = this.cellSize * GRID_HEIGHT;
@@ -189,28 +264,53 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private processCreatureEvents(dt: number): void {
-    this.birthLogTimer += dt;
+    this.eventLogTimer += dt;
     for (const event of this.creatures.consumeEvents()) {
-      if (event.type === 'birth') {
-        this.birthLogCounts[event.kind] += 1;
-        this.playBirthEffect(event);
+      switch (event.type) {
+        case 'birth':
+          if (event.kind) {
+            this.birthLogCounts[event.kind] += 1;
+          }
+          this.playBirthEffect(event);
+          break;
+        case 'hunt':
+          this.eventLogCounts.hunt += 1;
+          this.playHuntEffect(event);
+          break;
+        case 'scavenge':
+          this.eventLogCounts.scavenge += 1;
+          this.playScavengeEffect(event);
+          break;
+        case 'outbreak':
+          this.eventLogCounts.outbreak += 1;
+          this.playOutbreakEffect(event);
+          break;
+        case 'death':
+          this.eventLogCounts.death += 1;
+          break;
+        case 'recovery':
+          break;
       }
     }
 
-    if (this.birthLogTimer >= 1.5) {
+    if (this.eventLogTimer >= 1.5) {
       const messages: string[] = [];
-      if (this.birthLogCounts.herbivore > 0) {
-        messages.push(`草食動物 +${this.birthLogCounts.herbivore}`);
-      }
-      if (this.birthLogCounts.carnivore > 0) {
-        messages.push(`肉食動物 +${this.birthLogCounts.carnivore}`);
-      }
+      if (this.birthLogCounts.herbivore > 0) messages.push(`草食 +${this.birthLogCounts.herbivore}`);
+      if (this.birthLogCounts.carnivore > 0) messages.push(`肉食 +${this.birthLogCounts.carnivore}`);
+      if (this.eventLogCounts.hunt > 0) messages.push(`捕食 ${this.eventLogCounts.hunt}`);
+      if (this.eventLogCounts.scavenge > 0) messages.push(`腐肉漁り ${this.eventLogCounts.scavenge}`);
+      if (this.eventLogCounts.outbreak > 0) messages.push(`疫病 ${this.eventLogCounts.outbreak}`);
+      if (this.eventLogCounts.death > 0) messages.push(`自然死 ${this.eventLogCounts.death}`);
       if (messages.length > 0) {
-        this.ui.addLog(`${messages.join(' / ')} が繁殖`);
+        this.ui.addLog(messages.join(' / '));
       }
       this.birthLogCounts.herbivore = 0;
       this.birthLogCounts.carnivore = 0;
-      this.birthLogTimer = 0;
+      this.eventLogCounts.hunt = 0;
+      this.eventLogCounts.scavenge = 0;
+      this.eventLogCounts.outbreak = 0;
+      this.eventLogCounts.death = 0;
+      this.eventLogTimer = 0;
     }
   }
 
@@ -267,27 +367,19 @@ export class WorldScene extends Phaser.Scene {
     this.addRing(center.x, center.y, radius * 0.72, 0x7dccff, 2, 820, 80, 1.45);
 
     for (let i = 0; i < 58; i += 1) {
-      const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
-      const distance = Math.sqrt(Math.random()) * radius;
-      const x = center.x + Math.cos(angle) * distance;
-      const y = center.y + Math.sin(angle) * distance - Phaser.Math.Between(34, 86);
-      const drop = this.createEffectGraphic(x, y, 5);
+      const point = this.randomPointInRadius(center, radius);
+      const drop = this.createEffectGraphic(point.x, point.y - Phaser.Math.Between(34, 86), 5);
       drop.lineStyle(2, 0xa9e3ff, Phaser.Math.FloatBetween(0.55, 0.9));
       drop.lineBetween(0, 0, -this.cellSize * 0.25, this.cellSize * 1.7);
       this.tweens.add({
         targets: drop,
-        y: y + Phaser.Math.Between(58, 104),
+        y: drop.y + Phaser.Math.Between(58, 104),
         alpha: 0,
         duration: Phaser.Math.Between(480, 760),
         ease: 'Sine.easeIn',
         delay: Phaser.Math.Between(0, 170),
         onComplete: () => drop.destroy(),
       });
-    }
-
-    for (let i = 0; i < 10; i += 1) {
-      const ripple = this.randomPointInRadius(center, radius * 0.8);
-      this.addRing(ripple.x, ripple.y, this.cellSize * 0.45, 0xb9efff, 1, 620, Phaser.Math.Between(180, 520), 2.6);
     }
   }
 
@@ -316,9 +408,6 @@ export class WorldScene extends Phaser.Scene {
       ease: 'Cubic.easeOut',
       onComplete: () => rays.destroy(),
     });
-
-    this.addRing(center.x, center.y, radius * 0.25, 0xffe38b, 3, 780, 0, 3.2);
-    this.addRing(center.x, center.y, radius * 0.42, 0xff8f3c, 2, 920, 110, 2.2);
     this.burstParticles(center.x, center.y, 22, [0xffef9f, 0xff9d43, 0xff6b35], radius * 0.2, radius * 0.95, 880);
   }
 
@@ -328,33 +417,29 @@ export class WorldScene extends Phaser.Scene {
     this.addRing(center.x, center.y, this.cellSize * 1.2, 0xb7f26a, 2, 620, 0, 3);
     this.addRing(center.x, center.y, this.cellSize * 2.2, 0x68d466, 2, 760, 90, 2.4);
     this.burstParticles(center.x, center.y, 34, [0xd8ff80, 0x7de36a, 0x3ca65a], this.cellSize * 0.8, radius, 980);
-
-    for (let i = 0; i < 18; i += 1) {
-      const point = this.randomPointInRadius(center, radius);
-      const sprout = this.createEffectGraphic(point.x, point.y, 5);
-      sprout.lineStyle(2, 0x9bff75, 0.9);
-      sprout.lineBetween(0, this.cellSize * 0.4, 0, -this.cellSize * 0.55);
-      sprout.fillStyle(0xc8ff7a, 0.85);
-      sprout.fillCircle(-this.cellSize * 0.22, -this.cellSize * 0.18, Math.max(2, this.cellSize * 0.22));
-      sprout.fillCircle(this.cellSize * 0.22, -this.cellSize * 0.26, Math.max(2, this.cellSize * 0.22));
-      sprout.setScale(0.2);
-      this.tweens.add({
-        targets: sprout,
-        scale: 1,
-        alpha: 0,
-        duration: 980,
-        ease: 'Back.easeOut',
-        delay: Phaser.Math.Between(80, 360),
-        onComplete: () => sprout.destroy(),
-      });
-    }
   }
 
   private playBirthEffect(event: CreatureEvent): void {
     const center = this.gridToWorldCenter(event);
-    const color = event.kind === 'herbivore' ? 0xffef83 : 0xff715c;
+    const color = event.kind === 'carnivore' ? 0xff715c : 0xffef83;
     this.addRing(center.x, center.y, this.cellSize * 0.55, color, 2, 620, 0, 2.8);
     this.burstParticles(center.x, center.y, 8, [color, 0xffffff], this.cellSize * 0.25, this.cellSize * 1.8, 620);
+  }
+
+  private playHuntEffect(event: CreatureEvent): void {
+    const center = this.gridToWorldCenter(event);
+    this.burstParticles(center.x, center.y, 7, [0xff4d38, 0x5a1815], this.cellSize * 0.2, this.cellSize * 1.2, 420);
+  }
+
+  private playScavengeEffect(event: CreatureEvent): void {
+    const center = this.gridToWorldCenter(event);
+    this.addRing(center.x, center.y, this.cellSize * 0.4, 0xc8b28e, 1, 480, 0, 2);
+  }
+
+  private playOutbreakEffect(event: CreatureEvent): void {
+    const center = this.gridToWorldCenter(event);
+    this.addRing(center.x, center.y, this.cellSize * 0.7, 0x9bdd70, 2, 720, 0, 2.6);
+    this.burstParticles(center.x, center.y, 10, [0x9bdd70, 0xd6ffb0, 0x4f6f3d], this.cellSize * 0.2, this.cellSize * 1.7, 700);
   }
 
   private playImpactExplosion(x: number, y: number, radius: number): void {
@@ -376,24 +461,6 @@ export class WorldScene extends Phaser.Scene {
     this.addRing(x, y, radius * 0.58, 0xff8248, 3, 700, 80, 2.8);
     this.addRing(x, y, radius * 0.9, 0xe2d0b8, 2, 900, 150, 1.9);
     this.burstParticles(x, y, 42, [0xfff0aa, 0xff8942, 0xc9c0b1, 0x5c5048], radius * 0.2, radius * 1.15, 980);
-
-    for (let i = 0; i < 14; i += 1) {
-      const point = this.randomPointInRadius({ x, y }, radius * 0.58);
-      const smoke = this.createEffectGraphic(point.x, point.y, 5);
-      smoke.fillStyle(0xaea090, Phaser.Math.FloatBetween(0.25, 0.42));
-      smoke.fillCircle(0, 0, Phaser.Math.FloatBetween(this.cellSize * 0.7, this.cellSize * 1.45));
-      this.tweens.add({
-        targets: smoke,
-        x: point.x + Phaser.Math.Between(-20, 20),
-        y: point.y - Phaser.Math.Between(8, 34),
-        scale: Phaser.Math.FloatBetween(1.8, 2.6),
-        alpha: 0,
-        duration: Phaser.Math.Between(920, 1450),
-        ease: 'Sine.easeOut',
-        delay: Phaser.Math.Between(80, 260),
-        onComplete: () => smoke.destroy(),
-      });
-    }
   }
 
   private addRing(
@@ -486,13 +553,13 @@ export class WorldScene extends Phaser.Scene {
     for (let y = 0; y < this.environment.height; y += 1) {
       for (let x = 0; x < this.environment.width; x += 1) {
         const cell = this.environment.getCell(x, y);
-        if (!cell) {
-          continue;
+        if (cell) {
+          this.drawCell(cell, x, y);
         }
-        this.drawCell(cell, x, y);
       }
     }
 
+    this.drawAtmosphere(dt);
     this.drawCorpses();
     this.drawCreatures(dt);
   }
@@ -500,7 +567,8 @@ export class WorldScene extends Phaser.Scene {
   private drawTerrainBase(): void {
     const mapWidth = this.cellSize * GRID_WIDTH;
     const mapHeight = this.cellSize * GRID_HEIGHT;
-    this.terrainGraphics.fillStyle(0x66aa49, 1);
+    const climate = this.environment.getClimate();
+    this.terrainGraphics.fillStyle(baseSeasonColor[climate.season], 1);
     this.terrainGraphics.fillRect(this.mapOffsetX, this.mapOffsetY, mapWidth, mapHeight);
   }
 
@@ -512,28 +580,64 @@ export class WorldScene extends Phaser.Scene {
     const radius = Math.max(1.2, this.cellSize * 0.6);
 
     if (cell.terrain === 'crater') {
-      this.overlayGraphics.fillStyle(terrainColor.crater, 0.18 + cell.ash * 0.2);
+      this.overlayGraphics.fillStyle(terrainColor.crater, 0.16 + cell.ash * 0.18);
       this.overlayGraphics.fillCircle(cx, cy, radius * 1.12);
     }
-
     if (cell.terrain !== 'water' && cell.water > 0.78) {
-      this.overlayGraphics.fillStyle(0x6fc7e8, Math.min(0.14, (cell.water - 0.78) * 0.45));
+      this.overlayGraphics.fillStyle(0x6fc7e8, Math.min(0.13, (cell.water - 0.78) * 0.42));
       this.overlayGraphics.fillCircle(cx, cy, radius * 0.8);
     }
-
     if (cell.nutrient > 0.86 && cell.terrain !== 'water') {
       this.overlayGraphics.fillStyle(0xe8d86a, Math.min(0.08, (cell.nutrient - 0.86) * 0.26));
       this.overlayGraphics.fillCircle(cx, cy, radius * 0.7);
     }
-
+    if (cell.fungus > 0.38 && cell.terrain !== 'water') {
+      this.overlayGraphics.fillStyle(0x9bd36a, Math.min(0.16, cell.fungus * 0.2));
+      this.overlayGraphics.fillCircle(cx, cy, radius * 0.72);
+    }
     if (cell.heat > 0.55) {
-      this.overlayGraphics.fillStyle(0xff6b35, Math.min(0.34, cell.heat * 0.34));
+      this.overlayGraphics.fillStyle(0xff6b35, Math.min(0.3, cell.heat * 0.3));
       this.overlayGraphics.fillCircle(cx, cy, radius * 0.95);
     }
-
     if (cell.ash > 0.32) {
-      this.overlayGraphics.fillStyle(0xc9c0b1, Math.min(0.24, cell.ash * 0.24));
+      this.overlayGraphics.fillStyle(0xc9c0b1, Math.min(0.22, cell.ash * 0.22));
       this.overlayGraphics.fillCircle(cx, cy, radius);
+    }
+    if (cell.toxicity > 0.34) {
+      this.overlayGraphics.fillStyle(0x6f5aa8, Math.min(0.18, cell.toxicity * 0.22));
+      this.overlayGraphics.fillCircle(cx, cy, radius * 0.82);
+    }
+  }
+
+  private drawAtmosphere(dt: number): void {
+    const climate = this.environment.getClimate();
+    const tint = weatherTint[climate.weather];
+    const mapWidth = this.cellSize * GRID_WIDTH;
+    const mapHeight = this.cellSize * GRID_HEIGHT;
+    if (tint.alpha > 0) {
+      this.overlayGraphics.fillStyle(tint.color, tint.alpha);
+      this.overlayGraphics.fillRect(this.mapOffsetX, this.mapOffsetY, mapWidth, mapHeight);
+    }
+
+    if (climate.weather === 'rain' || climate.weather === 'storm') {
+      const drops = climate.weather === 'storm' ? 42 : 24;
+      this.overlayGraphics.lineStyle(1, 0xb6e6ff, climate.weather === 'storm' ? 0.22 : 0.16);
+      const drift = (this.time.now * 0.08) % 48;
+      for (let i = 0; i < drops; i += 1) {
+        const x = this.mapOffsetX + ((i * 97 + drift * 3) % mapWidth);
+        const y = this.mapOffsetY + ((i * 41 + drift) % mapHeight);
+        this.overlayGraphics.lineBetween(x, y, x - this.cellSize * 0.7, y + this.cellSize * 2.1);
+      }
+    }
+
+    if (climate.weather === 'ashfall') {
+      this.overlayGraphics.fillStyle(0xd0c7b8, 0.16);
+      const drift = this.time.now * 0.012 + dt;
+      for (let i = 0; i < 42; i += 1) {
+        const x = this.mapOffsetX + ((i * 83 + drift * 16) % mapWidth);
+        const y = this.mapOffsetY + ((i * 29 + drift * 23) % mapHeight);
+        this.overlayGraphics.fillCircle(x, y, Math.max(1, this.cellSize * 0.14));
+      }
     }
   }
 
@@ -548,7 +652,6 @@ export class WorldScene extends Phaser.Scene {
         visual = {
           x: target.x,
           y: target.y,
-          rotation: 0,
           bobSeed: Phaser.Math.FloatBetween(0, Math.PI * 2),
           movement: 0,
           facingLeft: false,
@@ -571,10 +674,6 @@ export class WorldScene extends Phaser.Scene {
         if (Math.abs(dx) > this.cellSize * 0.04) {
           visual.facingLeft = dx < 0;
         }
-        const travelAngle = Math.atan2(dy, dx);
-        const uprightAngle = visual.facingLeft ? Phaser.Math.Angle.Wrap(travelAngle - Math.PI) : travelAngle;
-        const leanAngle = Phaser.Math.Clamp(uprightAngle, -0.5, 0.5);
-        visual.rotation = Phaser.Math.Angle.RotateTo(visual.rotation, leanAngle, dt <= 0 ? Math.PI : dt * 12);
       }
 
       const spriteSize =
@@ -590,23 +689,40 @@ export class WorldScene extends Phaser.Scene {
         : 0;
       const frameOffset = creature.kind === 'herbivore' ? 0 : CREATURE_MOTION_FRAMES;
       const bob = Math.sin(this.time.now * 0.016 * gaitSpeed + visual.bobSeed) * Math.min(2.2, spriteSize * 0.055) * visual.movement;
-      this.actorGraphics.fillStyle(0x10130f, 0.22);
+      this.actorGraphics.fillStyle(0x10130f, creature.state === 'fleeing' ? 0.3 : 0.22);
       this.actorGraphics.fillEllipse(visual.x, visual.y + spriteSize * 0.18, shadowWidth, shadowHeight);
+
+      if (creature.sickness > 0.38) {
+        this.actorGraphics.fillStyle(0xa8e06f, 0.24);
+        this.actorGraphics.fillCircle(visual.x, visual.y - spriteSize * 0.18, Math.max(3, spriteSize * 0.16));
+      }
+      if (creature.state === 'fleeing') {
+        this.actorGraphics.lineStyle(1, 0xfff3a0, 0.48);
+        this.actorGraphics.strokeCircle(visual.x, visual.y, spriteSize * 0.48);
+      }
 
       let sprite = this.creatureSprites.get(creature.id);
       if (!sprite) {
-        sprite = this.add.image(visual.x, visual.y, 'creatures', frameOffset + motionFrame);
+        const textureKey = visual.facingLeft ? 'creatures-left' : 'creatures';
+        sprite = this.add.image(visual.x, visual.y, textureKey, frameOffset + motionFrame);
         sprite.setDepth(4);
         this.creatureSprites.set(creature.id, sprite);
       }
 
-      sprite.setFrame(frameOffset + motionFrame);
+      const textureKey = visual.facingLeft ? 'creatures-left' : 'creatures';
+      if (sprite.texture.key !== textureKey) {
+        sprite.setTexture(textureKey, frameOffset + motionFrame);
+      } else {
+        sprite.setFrame(frameOffset + motionFrame);
+      }
       sprite.setPosition(visual.x, visual.y + bob);
       sprite.setDisplaySize(spriteSize, spriteSize);
-      sprite.setFlipX(visual.facingLeft);
-      sprite.setRotation(visual.rotation);
-      sprite.setAlpha(Phaser.Math.Clamp(0.62 + creature.energy * 0.3, 0.58, 1));
-      if (creature.energy < 0.24) {
+      sprite.setFlipX(false);
+      sprite.setRotation(0);
+      sprite.setAlpha(Phaser.Math.Clamp(0.62 + creature.energy * 0.3 - creature.sickness * 0.14, 0.48, 1));
+      if (creature.sickness > 0.48) {
+        sprite.setTint(0xc7eaa1);
+      } else if (creature.stress > 0.7 || creature.energy < 0.24) {
         sprite.setTint(0xffc7a9);
       } else {
         sprite.clearTint();
@@ -628,8 +744,13 @@ export class WorldScene extends Phaser.Scene {
     for (const corpse of this.creatures.corpses) {
       const cx = this.mapOffsetX + corpse.x * this.cellSize + this.cellSize / 2;
       const cy = this.mapOffsetY + corpse.y * this.cellSize + this.cellSize / 2;
-      this.actorGraphics.fillStyle(0xead7be, Math.max(0.2, corpse.nutrientsLeft));
+      const ageAlpha = Phaser.Math.Clamp(0.2 + corpse.nutrientsLeft * 0.8, 0.16, 0.9);
+      this.actorGraphics.fillStyle(0xead7be, ageAlpha);
       this.actorGraphics.fillEllipse(cx, cy, radius * 2.1, radius * 1.1);
+      if (corpse.decay > 5) {
+        this.actorGraphics.fillStyle(0x9bd36a, 0.18);
+        this.actorGraphics.fillCircle(cx, cy, radius * 1.8);
+      }
     }
   }
 }

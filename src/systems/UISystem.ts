@@ -1,10 +1,30 @@
-import type { EcosystemStats, GodPower } from '../types';
+import type { EcosystemStats, GodPower, Season, Weather } from '../types';
+
+const seasonLabel: Record<Season, string> = {
+  spring: '春',
+  summer: '夏',
+  autumn: '秋',
+  winter: '冬',
+};
+
+const weatherLabel: Record<Weather, string> = {
+  clear: '晴',
+  rain: '雨',
+  storm: '嵐',
+  drought: '干ばつ',
+  heatwave: '熱波',
+  ashfall: '灰降り',
+};
 
 export class UISystem {
   private readonly grassMetric = this.requireElement('grassMetric');
   private readonly herbivoreMetric = this.requireElement('herbivoreMetric');
   private readonly carnivoreMetric = this.requireElement('carnivoreMetric');
   private readonly stabilityMetric = this.requireElement('stabilityMetric');
+  private readonly seasonMetric = this.requireElement('seasonMetric');
+  private readonly weatherMetric = this.requireElement('weatherMetric');
+  private readonly soilMetric = this.requireElement('soilMetric');
+  private readonly riskMetric = this.requireElement('riskMetric');
   private readonly eventLog = this.requireElement('eventLog');
   private readonly buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.power-button'));
   private readonly logs: string[] = [];
@@ -27,14 +47,21 @@ export class UISystem {
     this.herbivoreMetric.textContent = stats.herbivores.toString();
     this.carnivoreMetric.textContent = stats.carnivores.toString();
     this.stabilityMetric.textContent = `${stats.stability}%`;
+    this.seasonMetric.textContent = seasonLabel[stats.season];
+    this.weatherMetric.textContent = weatherLabel[stats.weather];
+    this.soilMetric.textContent = `${Math.round(stats.fertility * 100)}%`;
+    this.riskMetric.textContent = `${stats.corpses}/${stats.sick}`;
+
     this.stabilityMetric.classList.toggle('danger', stats.stability < 35);
+    this.riskMetric.classList.toggle('danger', stats.sick > 8 || stats.corpses > 22);
+    this.weatherMetric.classList.toggle('danger', stats.weather === 'heatwave' || stats.weather === 'drought' || stats.weather === 'ashfall');
   }
 
   addLog(message: string): void {
     const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     this.logs.unshift(`${time} ${message}`);
-    this.logs.splice(7);
-    this.eventLog.innerHTML = this.logs.map((entry) => `<li>${entry}</li>`).join('');
+    this.logs.splice(8);
+    this.eventLog.innerHTML = this.logs.map((entry) => `<li>${this.escapeHtml(entry)}</li>`).join('');
   }
 
   private setActivePower(power: GodPower): void {
@@ -49,5 +76,14 @@ export class UISystem {
       throw new Error(`Missing UI element: ${id}`);
     }
     return element;
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }
