@@ -20,6 +20,7 @@ interface CreatureVisual {
   rotation: number;
   bobSeed: number;
   movement: number;
+  facingLeft: boolean;
 }
 
 interface TerrainStampDefinition {
@@ -550,6 +551,7 @@ export class WorldScene extends Phaser.Scene {
           rotation: 0,
           bobSeed: Phaser.Math.FloatBetween(0, Math.PI * 2),
           movement: 0,
+          facingLeft: false,
         };
         this.creatureVisuals.set(creature.id, visual);
       }
@@ -566,7 +568,13 @@ export class WorldScene extends Phaser.Scene {
       }
       visual.movement = Phaser.Math.Linear(visual.movement, Math.min(1, distance / Math.max(1, this.cellSize * 1.8)), dt <= 0 ? 1 : dt * 12);
       if (distance > 0.02) {
-        visual.rotation = Phaser.Math.Angle.RotateTo(visual.rotation, Math.atan2(dy, dx), dt <= 0 ? Math.PI : dt * 12);
+        if (Math.abs(dx) > this.cellSize * 0.04) {
+          visual.facingLeft = dx < 0;
+        }
+        const travelAngle = Math.atan2(dy, dx);
+        const uprightAngle = visual.facingLeft ? Phaser.Math.Angle.Wrap(travelAngle - Math.PI) : travelAngle;
+        const leanAngle = Phaser.Math.Clamp(uprightAngle, -0.5, 0.5);
+        visual.rotation = Phaser.Math.Angle.RotateTo(visual.rotation, leanAngle, dt <= 0 ? Math.PI : dt * 12);
       }
 
       const spriteSize =
@@ -595,6 +603,7 @@ export class WorldScene extends Phaser.Scene {
       sprite.setFrame(frameOffset + motionFrame);
       sprite.setPosition(visual.x, visual.y + bob);
       sprite.setDisplaySize(spriteSize, spriteSize);
+      sprite.setFlipX(visual.facingLeft);
       sprite.setRotation(visual.rotation);
       sprite.setAlpha(Phaser.Math.Clamp(0.62 + creature.energy * 0.3, 0.58, 1));
       if (creature.energy < 0.24) {
