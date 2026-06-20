@@ -1,6 +1,5 @@
 import * as Phaser from 'phaser';
 import type { Cell, CreatureEvent, CreatureKind, GodPower, GridPosition, Terrain } from '../types';
-import terrainAtlasUrl from '../assets/terrain-atlas.png';
 import creatureAtlasUrl from '../assets/creature-atlas.png';
 import { CreatureSystem } from '../systems/CreatureSystem';
 import { EnvironmentSystem } from '../systems/EnvironmentSystem';
@@ -8,16 +7,23 @@ import { GodPowerSystem } from '../systems/GodPowerSystem';
 import { PlantSystem } from '../systems/PlantSystem';
 import { UISystem } from '../systems/UISystem';
 
-const GRID_WIDTH = 48;
-const GRID_HEIGHT = 32;
+const GRID_WIDTH = 84;
+const GRID_HEIGHT = 56;
 
-const terrainFrame: Record<Terrain, number> = {
-  grassland: 0,
-  forest: 1,
-  water: 2,
-  wasteland: 3,
-  crater: 4,
-  mountain: 5,
+interface CreatureVisual {
+  x: number;
+  y: number;
+  rotation: number;
+  bobSeed: number;
+}
+
+const terrainColor: Record<Terrain, number> = {
+  grassland: 0x5f9f43,
+  forest: 0x2f6b35,
+  water: 0x247da2,
+  wasteland: 0x76634a,
+  crater: 0x2f2d2a,
+  mountain: 0x656f6c,
 };
 
 export class WorldScene extends Phaser.Scene {
@@ -29,8 +35,8 @@ export class WorldScene extends Phaser.Scene {
   private terrainGraphics!: Phaser.GameObjects.Graphics;
   private actorGraphics!: Phaser.GameObjects.Graphics;
   private overlayGraphics!: Phaser.GameObjects.Graphics;
-  private readonly terrainSprites: Phaser.GameObjects.Image[] = [];
   private readonly creatureSprites = new Map<number, Phaser.GameObjects.Image>();
+  private readonly creatureVisuals = new Map<number, CreatureVisual>();
   private cellSize = 12;
   private mapOffsetX = 0;
   private mapOffsetY = 0;
@@ -46,7 +52,6 @@ export class WorldScene extends Phaser.Scene {
   }
 
   preload(): void {
-    this.load.spritesheet('terrain-tiles', terrainAtlasUrl, { frameWidth: 128, frameHeight: 128 });
     this.load.spritesheet('creatures', creatureAtlasUrl, { frameWidth: 128, frameHeight: 128 });
   }
 
@@ -63,7 +68,6 @@ export class WorldScene extends Phaser.Scene {
     this.terrainGraphics.setDepth(1);
     this.actorGraphics.setDepth(2);
     this.overlayGraphics.setDepth(4);
-    this.createTerrainSprites();
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       const grid = this.pointerToGrid(pointer.x, pointer.y);
@@ -85,7 +89,7 @@ export class WorldScene extends Phaser.Scene {
     this.plants.update(dt);
     this.creatures.update(dt);
     this.processCreatureEvents(dt);
-    this.renderWorld();
+    this.renderWorld(dt);
 
     this.statsTimer += dt;
     if (this.statsTimer > 0.25) {
@@ -103,57 +107,13 @@ export class WorldScene extends Phaser.Scene {
     const availableWidth = width - sidePadding * 2;
     const availableHeight = Math.max(220, height - topReserve - bottomReserve);
 
-    this.cellSize = Math.floor(Math.max(6, Math.min(availableWidth / GRID_WIDTH, availableHeight / GRID_HEIGHT)));
+    this.cellSize = Math.max(4, Math.min(availableWidth / GRID_WIDTH, availableHeight / GRID_HEIGHT));
     const mapWidth = this.cellSize * GRID_WIDTH;
     const mapHeight = this.cellSize * GRID_HEIGHT;
 
-    this.mapOffsetX = Math.floor((width - mapWidth) / 2);
-    this.mapOffsetY = Math.floor(topReserve + (availableHeight - mapHeight) / 2);
-    this.renderWorld();
-  }
-
-  private createTerrainSprites(): void {
-    for (let y = 0; y < this.environment.height; y += 1) {
-      for (let x = 0; x < this.environment.width; x += 1) {
-        const cell = this.environment.getCell(x, y);
-        const sprite = this.add.image(0, 0, 'terrain-tiles', cell ? this.getTerrainFrame(cell) : 0);
-        sprite.setOrigin(0, 0);
-        sprite.setDepth(0);
-        this.terrainSprites.push(sprite);
-      }
-    }
-    this.syncTerrainSprites();
-  }
-
-  private syncTerrainSprites(): void {
-    if (this.terrainSprites.length === 0 || !this.environment) {
-      return;
-    }
-
-    for (let y = 0; y < this.environment.height; y += 1) {
-      for (let x = 0; x < this.environment.width; x += 1) {
-        const index = y * this.environment.width + x;
-        const cell = this.environment.getCell(x, y);
-        const sprite = this.terrainSprites[index];
-        if (!cell || !sprite) {
-          continue;
-        }
-
-        sprite.setFrame(this.getTerrainFrame(cell));
-        sprite.setPosition(this.mapOffsetX + x * this.cellSize, this.mapOffsetY + y * this.cellSize);
-        sprite.setDisplaySize(this.cellSize, this.cellSize);
-      }
-    }
-  }
-
-  private getTerrainFrame(cell: Cell): number {
-    if (cell.terrain !== 'water' && cell.ash > 0.58) {
-      return 6;
-    }
-    if (cell.terrain === 'grassland' && cell.grass > 0.78 && cell.nutrient > 0.55) {
-      return 7;
-    }
-    return terrainFrame[cell.terrain];
+    this.mapOffsetX = (width - mapWidth) / 2;
+    this.mapOffsetY = topReserve + (availableHeight - mapHeight) / 2;
+    this.renderWorld(0);
   }
 
   private pointerToGrid(pointerX: number, pointerY: number): GridPosition | undefined {
@@ -450,15 +410,15 @@ export class WorldScene extends Phaser.Scene {
     };
   }
 
-  private renderWorld(): void {
+  private renderWorld(dt = 0): void {
     if (!this.terrainGraphics) {
       return;
     }
 
-    this.syncTerrainSprites();
     this.terrainGraphics.clear();
     this.actorGraphics.clear();
     this.overlayGraphics.clear();
+    this.drawTerrainBase();
 
     for (let y = 0; y < this.environment.height; y += 1) {
       for (let x = 0; x < this.environment.width; x += 1) {
@@ -471,62 +431,110 @@ export class WorldScene extends Phaser.Scene {
     }
 
     this.drawCorpses();
-    this.drawCreatures();
-    this.drawFrame();
+    this.drawCreatures(dt);
+  }
+
+  private drawTerrainBase(): void {
+    const mapWidth = this.cellSize * GRID_WIDTH;
+    const mapHeight = this.cellSize * GRID_HEIGHT;
+    this.terrainGraphics.fillStyle(0x66aa49, 1);
+    this.terrainGraphics.fillRect(this.mapOffsetX, this.mapOffsetY, mapWidth, mapHeight);
   }
 
   private drawCell(cell: Cell, x: number, y: number): void {
     const px = this.mapOffsetX + x * this.cellSize;
     const py = this.mapOffsetY + y * this.cellSize;
-    const interior = Math.max(1, this.cellSize - 2);
+    const bleed = Math.max(0.28, this.cellSize * 0.08);
+    const size = this.cellSize + bleed * 2;
+    const base = Phaser.Display.Color.ValueToColor(terrainColor[cell.terrain]);
+    const grassTint = Math.floor(26 * cell.grass);
+    const waterTint = Math.floor(42 * cell.water);
+    const nutrientTint = Math.floor(18 * cell.nutrient);
+    const heatTint = Math.floor(52 * cell.heat);
+    const ashTint = Math.floor(46 * cell.ash);
+    const color = Phaser.Display.Color.GetColor(
+      Phaser.Math.Clamp(base.red + heatTint + ashTint * 0.25, 0, 255),
+      Phaser.Math.Clamp(base.green + grassTint + nutrientTint, 0, 255),
+      Phaser.Math.Clamp(base.blue + waterTint + ashTint * 0.2, 0, 255),
+    );
+
+    this.terrainGraphics.fillStyle(color, 1);
+    this.terrainGraphics.fillRect(px - bleed, py - bleed, size, size);
 
     if (cell.terrain !== 'water' && cell.terrain !== 'crater' && cell.terrain !== 'mountain' && cell.grass > 0.42) {
-      this.terrainGraphics.fillStyle(0xa7e961, Math.min(0.28, (cell.grass - 0.42) * 0.42));
-      this.terrainGraphics.fillRect(px + 1, py + 1, interior, interior);
+      this.terrainGraphics.fillStyle(0xa7e961, Math.min(0.07, (cell.grass - 0.42) * 0.16));
+      this.terrainGraphics.fillRect(px - bleed, py - bleed, size, size);
     }
 
     if (cell.terrain !== 'water' && cell.water > 0.7) {
-      this.terrainGraphics.fillStyle(0x6fc7e8, Math.min(0.24, (cell.water - 0.7) * 0.7));
-      this.terrainGraphics.fillRect(px + 1, py + 1, interior, interior);
+      this.terrainGraphics.fillStyle(0x6fc7e8, Math.min(0.18, (cell.water - 0.7) * 0.55));
+      this.terrainGraphics.fillRect(px - bleed, py - bleed, size, size);
     }
 
     if (cell.nutrient > 0.78 && cell.terrain !== 'water') {
-      this.terrainGraphics.fillStyle(0xe8d86a, Math.min(0.16, (cell.nutrient - 0.78) * 0.45));
-      this.terrainGraphics.fillRect(px + 1, py + 1, interior, interior);
+      this.terrainGraphics.fillStyle(0xe8d86a, Math.min(0.1, (cell.nutrient - 0.78) * 0.32));
+      this.terrainGraphics.fillRect(px - bleed, py - bleed, size, size);
     }
 
     if (cell.heat > 0.55) {
       this.terrainGraphics.fillStyle(0xff6b35, Math.min(0.42, cell.heat * 0.42));
-      this.terrainGraphics.fillRect(px, py, this.cellSize, this.cellSize);
+      this.terrainGraphics.fillRect(px - bleed, py - bleed, size, size);
     }
 
     if (cell.ash > 0.32) {
       this.terrainGraphics.fillStyle(0xc9c0b1, Math.min(0.34, cell.ash * 0.34));
-      this.terrainGraphics.fillRect(px + 1, py + 1, interior, interior);
+      this.terrainGraphics.fillRect(px - bleed, py - bleed, size, size);
     }
   }
 
-  private drawCreatures(): void {
-    const shadowWidth = Math.max(3, this.cellSize * 0.96);
-    const shadowHeight = Math.max(2, this.cellSize * 0.44);
+  private drawCreatures(dt: number): void {
+    const spriteSize = Math.max(10, this.cellSize * 2.2);
+    const shadowWidth = Math.max(6, spriteSize * 0.72);
+    const shadowHeight = Math.max(3, spriteSize * 0.32);
+    const follow = dt <= 0 ? 1 : 1 - Math.exp(-dt * 13);
     const aliveIds = new Set<number>();
 
     for (const creature of this.creatures.creatures) {
-      const cx = this.mapOffsetX + creature.x * this.cellSize + this.cellSize / 2;
-      const cy = this.mapOffsetY + creature.y * this.cellSize + this.cellSize / 2;
+      const target = this.gridToWorldCenter(creature);
+      let visual = this.creatureVisuals.get(creature.id);
+      if (!visual) {
+        visual = {
+          x: target.x,
+          y: target.y,
+          rotation: 0,
+          bobSeed: Phaser.Math.FloatBetween(0, Math.PI * 2),
+        };
+        this.creatureVisuals.set(creature.id, visual);
+      }
+
+      const dx = target.x - visual.x;
+      const dy = target.y - visual.y;
+      if (Math.hypot(dx, dy) > this.cellSize * 5) {
+        visual.x = target.x;
+        visual.y = target.y;
+      } else {
+        visual.x = Phaser.Math.Linear(visual.x, target.x, follow);
+        visual.y = Phaser.Math.Linear(visual.y, target.y, follow);
+      }
+      if (Math.abs(dx) + Math.abs(dy) > 0.02) {
+        visual.rotation = Phaser.Math.Angle.RotateTo(visual.rotation, Math.atan2(dy, dx), dt <= 0 ? Math.PI : dt * 10);
+      }
+
+      const bob = Math.sin(this.time.now * 0.01 + visual.bobSeed) * Math.min(0.8, this.cellSize * 0.08);
       this.actorGraphics.fillStyle(0x10130f, 0.22);
-      this.actorGraphics.fillEllipse(cx, cy + this.cellSize * 0.2, shadowWidth, shadowHeight);
+      this.actorGraphics.fillEllipse(visual.x, visual.y + spriteSize * 0.18, shadowWidth, shadowHeight);
 
       let sprite = this.creatureSprites.get(creature.id);
       if (!sprite) {
-        sprite = this.add.image(cx, cy, 'creatures', creature.kind === 'herbivore' ? 0 : 1);
+        sprite = this.add.image(visual.x, visual.y, 'creatures', creature.kind === 'herbivore' ? 0 : 1);
         sprite.setDepth(3);
         this.creatureSprites.set(creature.id, sprite);
       }
 
       sprite.setFrame(creature.kind === 'herbivore' ? 0 : 1);
-      sprite.setPosition(cx, cy);
-      sprite.setDisplaySize(this.cellSize * 1.45, this.cellSize * 1.45);
+      sprite.setPosition(visual.x, visual.y + bob);
+      sprite.setDisplaySize(spriteSize, spriteSize);
+      sprite.setRotation(visual.rotation * 0.18);
       sprite.setAlpha(Phaser.Math.Clamp(0.54 + creature.energy * 0.34, 0.52, 1));
       if (creature.energy < 0.24) {
         sprite.setTint(0xffc7a9);
@@ -540,6 +548,7 @@ export class WorldScene extends Phaser.Scene {
       if (!aliveIds.has(id)) {
         sprite.destroy();
         this.creatureSprites.delete(id);
+        this.creatureVisuals.delete(id);
       }
     }
   }
@@ -550,14 +559,7 @@ export class WorldScene extends Phaser.Scene {
       const cx = this.mapOffsetX + corpse.x * this.cellSize + this.cellSize / 2;
       const cy = this.mapOffsetY + corpse.y * this.cellSize + this.cellSize / 2;
       this.actorGraphics.fillStyle(0xead7be, Math.max(0.2, corpse.nutrientsLeft));
-      this.actorGraphics.fillRect(cx - radius, cy - radius * 0.45, radius * 2, radius * 0.9);
+      this.actorGraphics.fillEllipse(cx, cy, radius * 2.1, radius * 1.1);
     }
-  }
-
-  private drawFrame(): void {
-    const mapWidth = this.cellSize * GRID_WIDTH;
-    const mapHeight = this.cellSize * GRID_HEIGHT;
-    this.overlayGraphics.lineStyle(2, 0xd7e6c5, 0.32);
-    this.overlayGraphics.strokeRect(this.mapOffsetX - 1, this.mapOffsetY - 1, mapWidth + 2, mapHeight + 2);
   }
 }

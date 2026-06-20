@@ -134,7 +134,7 @@ export class EnvironmentSystem {
     const ny = y / this.height;
     const lake = Math.hypot(nx - 0.72, ny - 0.32) < 0.15 || Math.hypot(nx - 0.25, ny - 0.72) < 0.1;
     const crater = Math.hypot(nx - 0.52, ny - 0.55) < 0.09;
-    const forestBand = Math.sin(x * 0.55) + Math.cos(y * 0.44) > 0.95;
+    const forestBand = Math.sin(nx * 18) + Math.cos(ny * 16) + Math.sin((nx + ny) * 22) > 1.35;
     const mountainRidge =
       (nx > 0.56 && ny > 0.58 && Math.abs(ny - (0.7 + Math.sin(x * 0.3) * 0.08)) < 0.085) ||
       (nx > 0.78 && ny < 0.24 && Math.abs(ny - (0.14 + Math.cos(x * 0.35) * 0.05)) < 0.06);
