@@ -1,5 +1,6 @@
 import * as Phaser from 'phaser';
 import type { Cell, CreatureEvent, CreatureKind, GodPower, GridPosition, Terrain } from '../types';
+import terrainStampsUrl from '../assets/terrain-stamps.png';
 import creatureAtlasUrl from '../assets/creature-atlas.png';
 import { CreatureSystem } from '../systems/CreatureSystem';
 import { EnvironmentSystem } from '../systems/EnvironmentSystem';
@@ -7,7 +8,7 @@ import { GodPowerSystem } from '../systems/GodPowerSystem';
 import { PlantSystem } from '../systems/PlantSystem';
 import { UISystem } from '../systems/UISystem';
 
-const GRID_WIDTH = 84;
+const GRID_WIDTH = 122;
 const GRID_HEIGHT = 56;
 
 interface CreatureVisual {
@@ -16,6 +17,30 @@ interface CreatureVisual {
   rotation: number;
   bobSeed: number;
 }
+
+interface TerrainStampDefinition {
+  frame: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  alpha?: number;
+  angle?: number;
+  flipX?: boolean;
+}
+
+const TERRAIN_STAMPS: TerrainStampDefinition[] = [
+  { frame: 3, x: 0.12, y: 0.24, width: 0.24, height: 0.42, alpha: 0.96 },
+  { frame: 0, x: 0.18, y: 0.72, width: 0.22, height: 0.28, alpha: 0.96, angle: -8 },
+  { frame: 0, x: 0.36, y: 0.17, width: 0.18, height: 0.24, alpha: 0.92, flipX: true },
+  { frame: 0, x: 0.82, y: 0.2, width: 0.16, height: 0.22, alpha: 0.9, angle: 9 },
+  { frame: 2, x: 0.72, y: 0.33, width: 0.33, height: 0.33, alpha: 0.98 },
+  { frame: 2, x: 0.25, y: 0.74, width: 0.22, height: 0.23, alpha: 0.96 },
+  { frame: 4, x: 0.52, y: 0.56, width: 0.19, height: 0.22, alpha: 0.98 },
+  { frame: 1, x: 0.73, y: 0.74, width: 0.34, height: 0.28, alpha: 0.95, angle: 6 },
+  { frame: 1, x: 0.91, y: 0.53, width: 0.26, height: 0.22, alpha: 0.9, angle: -7, flipX: true },
+  { frame: 1, x: 0.88, y: 0.09, width: 0.2, height: 0.18, alpha: 0.86, angle: 4 },
+];
 
 const terrainColor: Record<Terrain, number> = {
   grassland: 0x5f9f43,
@@ -35,6 +60,7 @@ export class WorldScene extends Phaser.Scene {
   private terrainGraphics!: Phaser.GameObjects.Graphics;
   private actorGraphics!: Phaser.GameObjects.Graphics;
   private overlayGraphics!: Phaser.GameObjects.Graphics;
+  private readonly terrainStamps: Phaser.GameObjects.Image[] = [];
   private readonly creatureSprites = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureVisuals = new Map<number, CreatureVisual>();
   private cellSize = 12;
@@ -52,6 +78,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   preload(): void {
+    this.load.spritesheet('terrain-stamps', terrainStampsUrl, { frameWidth: 256, frameHeight: 256 });
     this.load.spritesheet('creatures', creatureAtlasUrl, { frameWidth: 128, frameHeight: 128 });
   }
 
@@ -65,9 +92,10 @@ export class WorldScene extends Phaser.Scene {
     this.terrainGraphics = this.add.graphics();
     this.actorGraphics = this.add.graphics();
     this.overlayGraphics = this.add.graphics();
-    this.terrainGraphics.setDepth(1);
-    this.actorGraphics.setDepth(2);
-    this.overlayGraphics.setDepth(4);
+    this.terrainGraphics.setDepth(0);
+    this.overlayGraphics.setDepth(2);
+    this.actorGraphics.setDepth(3);
+    this.createTerrainStamps();
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       const grid = this.pointerToGrid(pointer.x, pointer.y);
@@ -101,19 +129,43 @@ export class WorldScene extends Phaser.Scene {
   private resizeMap(): void {
     const width = this.scale.width;
     const height = this.scale.height;
-    const topReserve = width < 640 ? 112 : 84;
-    const bottomReserve = width < 640 ? 118 : 96;
-    const sidePadding = width < 640 ? 8 : 18;
-    const availableWidth = width - sidePadding * 2;
-    const availableHeight = Math.max(220, height - topReserve - bottomReserve);
+    const edgePadding = width < 640 ? 2 : 4;
+    const availableWidth = width - edgePadding * 2;
+    const availableHeight = height - edgePadding * 2;
 
     this.cellSize = Math.max(4, Math.min(availableWidth / GRID_WIDTH, availableHeight / GRID_HEIGHT));
     const mapWidth = this.cellSize * GRID_WIDTH;
     const mapHeight = this.cellSize * GRID_HEIGHT;
 
     this.mapOffsetX = (width - mapWidth) / 2;
-    this.mapOffsetY = topReserve + (availableHeight - mapHeight) / 2;
+    this.mapOffsetY = edgePadding + (availableHeight - mapHeight) / 2;
+    this.syncTerrainStamps();
     this.renderWorld(0);
+  }
+
+  private createTerrainStamps(): void {
+    for (const stamp of TERRAIN_STAMPS) {
+      const image = this.add.image(0, 0, 'terrain-stamps', stamp.frame);
+      image.setDepth(1);
+      image.setAlpha(stamp.alpha ?? 1);
+      image.setAngle(stamp.angle ?? 0);
+      image.setFlipX(stamp.flipX ?? false);
+      this.terrainStamps.push(image);
+    }
+  }
+
+  private syncTerrainStamps(): void {
+    const mapWidth = this.cellSize * GRID_WIDTH;
+    const mapHeight = this.cellSize * GRID_HEIGHT;
+    for (let i = 0; i < TERRAIN_STAMPS.length; i += 1) {
+      const definition = TERRAIN_STAMPS[i];
+      const image = this.terrainStamps[i];
+      if (!image) {
+        continue;
+      }
+      image.setPosition(this.mapOffsetX + definition.x * mapWidth, this.mapOffsetY + definition.y * mapHeight);
+      image.setDisplaySize(definition.width * mapWidth, definition.height * mapHeight);
+    }
   }
 
   private pointerToGrid(pointerX: number, pointerY: number): GridPosition | undefined {
@@ -444,46 +496,33 @@ export class WorldScene extends Phaser.Scene {
   private drawCell(cell: Cell, x: number, y: number): void {
     const px = this.mapOffsetX + x * this.cellSize;
     const py = this.mapOffsetY + y * this.cellSize;
-    const bleed = Math.max(0.28, this.cellSize * 0.08);
-    const size = this.cellSize + bleed * 2;
-    const base = Phaser.Display.Color.ValueToColor(terrainColor[cell.terrain]);
-    const grassTint = Math.floor(26 * cell.grass);
-    const waterTint = Math.floor(42 * cell.water);
-    const nutrientTint = Math.floor(18 * cell.nutrient);
-    const heatTint = Math.floor(52 * cell.heat);
-    const ashTint = Math.floor(46 * cell.ash);
-    const color = Phaser.Display.Color.GetColor(
-      Phaser.Math.Clamp(base.red + heatTint + ashTint * 0.25, 0, 255),
-      Phaser.Math.Clamp(base.green + grassTint + nutrientTint, 0, 255),
-      Phaser.Math.Clamp(base.blue + waterTint + ashTint * 0.2, 0, 255),
-    );
+    const cx = px + this.cellSize / 2;
+    const cy = py + this.cellSize / 2;
+    const radius = Math.max(1.2, this.cellSize * 0.6);
 
-    this.terrainGraphics.fillStyle(color, 1);
-    this.terrainGraphics.fillRect(px - bleed, py - bleed, size, size);
-
-    if (cell.terrain !== 'water' && cell.terrain !== 'crater' && cell.terrain !== 'mountain' && cell.grass > 0.42) {
-      this.terrainGraphics.fillStyle(0xa7e961, Math.min(0.07, (cell.grass - 0.42) * 0.16));
-      this.terrainGraphics.fillRect(px - bleed, py - bleed, size, size);
+    if (cell.terrain === 'crater') {
+      this.overlayGraphics.fillStyle(terrainColor.crater, 0.18 + cell.ash * 0.2);
+      this.overlayGraphics.fillCircle(cx, cy, radius * 1.12);
     }
 
-    if (cell.terrain !== 'water' && cell.water > 0.7) {
-      this.terrainGraphics.fillStyle(0x6fc7e8, Math.min(0.18, (cell.water - 0.7) * 0.55));
-      this.terrainGraphics.fillRect(px - bleed, py - bleed, size, size);
+    if (cell.terrain !== 'water' && cell.water > 0.78) {
+      this.overlayGraphics.fillStyle(0x6fc7e8, Math.min(0.14, (cell.water - 0.78) * 0.45));
+      this.overlayGraphics.fillCircle(cx, cy, radius * 0.8);
     }
 
-    if (cell.nutrient > 0.78 && cell.terrain !== 'water') {
-      this.terrainGraphics.fillStyle(0xe8d86a, Math.min(0.1, (cell.nutrient - 0.78) * 0.32));
-      this.terrainGraphics.fillRect(px - bleed, py - bleed, size, size);
+    if (cell.nutrient > 0.86 && cell.terrain !== 'water') {
+      this.overlayGraphics.fillStyle(0xe8d86a, Math.min(0.08, (cell.nutrient - 0.86) * 0.26));
+      this.overlayGraphics.fillCircle(cx, cy, radius * 0.7);
     }
 
     if (cell.heat > 0.55) {
-      this.terrainGraphics.fillStyle(0xff6b35, Math.min(0.42, cell.heat * 0.42));
-      this.terrainGraphics.fillRect(px - bleed, py - bleed, size, size);
+      this.overlayGraphics.fillStyle(0xff6b35, Math.min(0.34, cell.heat * 0.34));
+      this.overlayGraphics.fillCircle(cx, cy, radius * 0.95);
     }
 
     if (cell.ash > 0.32) {
-      this.terrainGraphics.fillStyle(0xc9c0b1, Math.min(0.34, cell.ash * 0.34));
-      this.terrainGraphics.fillRect(px - bleed, py - bleed, size, size);
+      this.overlayGraphics.fillStyle(0xc9c0b1, Math.min(0.24, cell.ash * 0.24));
+      this.overlayGraphics.fillCircle(cx, cy, radius);
     }
   }
 

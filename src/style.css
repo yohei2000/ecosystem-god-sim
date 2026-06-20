@@ -42,20 +42,21 @@ canvas {
 }
 
 #hud {
-  top: max(10px, env(safe-area-inset-top));
-  left: 10px;
-  right: 10px;
+  top: max(8px, env(safe-area-inset-top));
+  left: max(8px, env(safe-area-inset-left));
+  right: auto;
+  width: min(230px, 38vw);
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
 }
 
 .metric {
   min-width: 0;
   border: 1px solid rgba(219, 232, 197, 0.18);
-  border-radius: 8px;
-  background: rgba(13, 22, 14, 0.76);
-  padding: 8px 9px;
+  border-radius: 6px;
+  background: rgba(13, 22, 14, 0.58);
+  padding: 5px 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(10px);
 }
@@ -63,7 +64,7 @@ canvas {
 .metric span {
   display: block;
   color: #aebaa2;
-  font-size: 11px;
+  font-size: 9px;
   line-height: 1.1;
 }
 
@@ -71,7 +72,7 @@ canvas {
   display: block;
   margin-top: 3px;
   color: #f2f5df;
-  font-size: 18px;
+  font-size: 14px;
   line-height: 1;
   white-space: nowrap;
 }
@@ -81,55 +82,57 @@ canvas {
 }
 
 #logPanel {
-  top: max(72px, calc(env(safe-area-inset-top) + 70px));
-  left: 10px;
-  width: min(320px, calc(100vw - 20px));
+  top: max(76px, calc(env(safe-area-inset-top) + 74px));
+  left: max(8px, env(safe-area-inset-left));
+  width: min(260px, 38vw);
   border: 1px solid rgba(219, 232, 197, 0.16);
-  border-radius: 8px;
-  background: rgba(13, 22, 14, 0.7);
-  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(13, 22, 14, 0.56);
+  padding: 5px 7px;
   backdrop-filter: blur(10px);
 }
 
 #logPanel h1 {
-  margin: 0 0 4px;
+  margin: 0 0 3px;
   color: #e9f0dc;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0;
 }
 
 #eventLog {
   display: grid;
-  gap: 2px;
-  max-height: 80px;
+  gap: 1px;
+  max-height: 44px;
   margin: 0;
   padding: 0;
   overflow: hidden;
   color: #bbc7ae;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.25;
   list-style: none;
 }
 
 #powerBar {
-  right: 10px;
-  bottom: max(10px, env(safe-area-inset-bottom));
-  left: 10px;
+  right: max(8px, env(safe-area-inset-right));
+  bottom: max(8px, env(safe-area-inset-bottom));
+  left: auto;
+  width: auto;
   display: grid;
-  grid-template-columns: repeat(4, minmax(68px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(4, 62px);
+  gap: 6px;
   pointer-events: auto;
 }
 
 .power-button {
-  min-height: 50px;
+  min-width: 0;
+  min-height: 40px;
   border: 1px solid rgba(236, 241, 220, 0.2);
-  border-radius: 8px;
-  background: rgba(18, 30, 20, 0.92);
+  border-radius: 6px;
+  background: rgba(18, 30, 20, 0.78);
   color: #f1f4e9;
   font: inherit;
-  font-size: 15px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0;
   touch-action: manipulation;
@@ -148,21 +151,20 @@ canvas {
 
 @media (max-width: 560px) {
   #hud {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px;
+    width: min(180px, 46vw);
   }
 
   .metric {
-    padding: 7px 8px;
+    padding: 5px 6px;
   }
 
   .metric strong {
-    font-size: 16px;
+    font-size: 13px;
   }
 
   #logPanel {
-    top: max(108px, calc(env(safe-area-inset-top) + 106px));
-    padding: 7px 8px;
+    top: max(72px, calc(env(safe-area-inset-top) + 70px));
+    width: min(220px, 58vw);
   }
 
   #eventLog {
@@ -170,15 +172,13 @@ canvas {
   }
 
   #powerBar {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
+    grid-template-columns: repeat(4, 58px);
   }
 
   .power-button {
-    min-width: 0;
-    min-height: 48px;
+    min-height: 40px;
     padding: 0 4px;
-    font-size: clamp(12px, 3.5vw, 14px);
+    font-size: 12px;
   }
 }
 
