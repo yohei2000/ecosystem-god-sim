@@ -24,6 +24,12 @@ export interface Creature extends GridPosition {
   energy: number;
   age: number;
   moveCooldown: number;
+  reproductionCooldown: number;
+}
+
+export interface CreatureEvent extends GridPosition {
+  type: 'birth';
+  kind: CreatureKind;
 }
 
 export interface Corpse extends GridPosition {

@@ -1,13 +1,14 @@
 import * as Phaser from 'phaser';
-import type { Corpse, Creature, CreatureKind, EcosystemStats, GridPosition } from '../types';
+import type { Corpse, Creature, CreatureEvent, CreatureKind, EcosystemStats, GridPosition } from '../types';
 import { EnvironmentSystem } from './EnvironmentSystem';
 
-const MAX_CREATURES = 120;
+const MAX_CREATURES = 150;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 export class CreatureSystem {
   readonly creatures: Creature[] = [];
   readonly corpses: Corpse[] = [];
+  private readonly events: CreatureEvent[] = [];
   private nextId = 1;
 
   constructor(private readonly environment: EnvironmentSystem) {
@@ -22,6 +23,7 @@ export class CreatureSystem {
       creature.age += dt;
       creature.energy -= (creature.kind === 'herbivore' ? 0.035 : 0.05) * dt;
       creature.moveCooldown -= dt;
+      creature.reproductionCooldown = Math.max(0, creature.reproductionCooldown - dt);
 
       const cell = this.environment.getCell(creature.x, creature.y);
       if (!cell || cell.terrain === 'water' || cell.terrain === 'crater' || cell.heat > 0.93) {
@@ -37,7 +39,7 @@ export class CreatureSystem {
         creature.moveCooldown = creature.kind === 'herbivore' ? 0.28 : 0.22;
       }
 
-      this.tryReproduce(creature);
+      this.tryReproduce(creature, dt);
 
       if (creature.energy <= 0) {
         this.killCreature(creature);
@@ -63,6 +65,10 @@ export class CreatureSystem {
         this.addCreature('herbivore', point.x, point.y, 0.65);
       }
     }
+  }
+
+  consumeEvents(): CreatureEvent[] {
+    return this.events.splice(0);
   }
 
   getStats(): EcosystemStats {
@@ -98,8 +104,9 @@ export class CreatureSystem {
     const prey = this.findNearestCreature(creature, 'herbivore', 9);
     if (prey) {
       this.stepToward(creature, prey);
-      if (creature.x === prey.x && creature.y === prey.y) {
-        this.killCreature(prey);
+      const caught = this.findNearestCreature(creature, 'herbivore', 1.15);
+      if (caught) {
+        this.killCreature(caught);
         creature.energy = clamp(creature.energy + 0.85, 0, 1.8);
       }
       return;
@@ -126,23 +133,59 @@ export class CreatureSystem {
     }
   }
 
-  private tryReproduce(parent: Creature): void {
-    if (this.creatures.length >= MAX_CREATURES || parent.energy < (parent.kind === 'herbivore' ? 1.05 : 1.2)) {
+  private tryReproduce(parent: Creature, dt: number): void {
+    const energyThreshold = parent.kind === 'herbivore' ? 1.02 : 0.95;
+    if (
+      this.creatures.length >= MAX_CREATURES ||
+      parent.age < 3 ||
+      parent.reproductionCooldown > 0 ||
+      parent.energy < energyThreshold ||
+      !this.hasReproductionSupport(parent)
+    ) {
       return;
     }
 
-    const chance = parent.kind === 'herbivore' ? 0.025 : 0.014;
+    const reproductionRate = parent.kind === 'herbivore' ? 0.18 : 0.24;
+    const chance = 1 - Math.exp(-reproductionRate * dt);
     if (Math.random() > chance) {
       return;
     }
 
-    const point = this.findNearbyWalkable(parent, 2);
+    const point = this.findNearbyWalkable(parent, 3);
     if (!point) {
       return;
     }
 
-    parent.energy *= 0.58;
-    this.addCreature(parent.kind, point.x, point.y, parent.kind === 'herbivore' ? 0.55 : 0.7);
+    const birthCost = parent.kind === 'herbivore' ? 0.38 : 0.36;
+    parent.energy = clamp(parent.energy - birthCost, 0.25, 1.8);
+    parent.reproductionCooldown = parent.kind === 'herbivore' ? 7 : 8.5;
+
+    const child = this.addCreature(parent.kind, point.x, point.y, parent.kind === 'herbivore' ? 0.62 : 0.82);
+    child.reproductionCooldown = parent.kind === 'herbivore' ? 8.5 : 9.5;
+    this.events.push({ type: 'birth', kind: parent.kind, x: point.x, y: point.y });
+  }
+
+  private hasReproductionSupport(parent: Creature): boolean {
+    if (parent.kind === 'herbivore') {
+      let nearbyGrass = 0;
+      this.environment.forEachInRadius(parent, 3, (cell, distance) => {
+        nearbyGrass += cell.grass / (distance + 1);
+      });
+      return nearbyGrass > 0.85;
+    }
+
+    let nearbyPrey = 0;
+    let nearbyPredators = 0;
+    for (const creature of this.creatures) {
+      const distance = Math.hypot(creature.x - parent.x, creature.y - parent.y);
+      if (creature.kind === 'herbivore' && distance <= 8) {
+        nearbyPrey += 1;
+      }
+      if (creature.kind === 'carnivore' && distance <= 5) {
+        nearbyPredators += 1;
+      }
+    }
+    return nearbyPrey >= Math.max(2, nearbyPredators);
   }
 
   private killCreature(creature: Creature): void {
@@ -227,11 +270,11 @@ export class CreatureSystem {
   private spawnInitialPopulation(): void {
     for (let i = 0; i < 34; i += 1) {
       const point = this.randomWalkablePoint();
-      this.addCreature('herbivore', point.x, point.y, Phaser.Math.FloatBetween(0.45, 0.9));
+      this.addCreature('herbivore', point.x, point.y, Phaser.Math.FloatBetween(0.55, 1.02));
     }
     for (let i = 0; i < 9; i += 1) {
       const point = this.randomWalkablePoint();
-      this.addCreature('carnivore', point.x, point.y, Phaser.Math.FloatBetween(0.65, 1.1));
+      this.addCreature('carnivore', point.x, point.y, Phaser.Math.FloatBetween(0.85, 1.24));
     }
   }
 
@@ -246,8 +289,8 @@ export class CreatureSystem {
     return { x: 0, y: 0 };
   }
 
-  private addCreature(kind: CreatureKind, x: number, y: number, energy: number): void {
-    this.creatures.push({
+  private addCreature(kind: CreatureKind, x: number, y: number, energy: number): Creature {
+    const creature: Creature = {
       id: this.nextId++,
       kind,
       x,
@@ -255,6 +298,9 @@ export class CreatureSystem {
       energy,
       age: 0,
       moveCooldown: Phaser.Math.FloatBetween(0.05, 0.35),
-    });
+      reproductionCooldown: Phaser.Math.FloatBetween(1.5, 4),
+    };
+    this.creatures.push(creature);
+    return creature;
   }
 }
