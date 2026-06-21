@@ -45,7 +45,7 @@ public static class PremiumAssetGenerator
 
     private static void DrawCreatureAtlas(string path)
     {
-        using (var bmp = new Bitmap(CreatureFrame * 4, CreatureFrame * 7, PixelFormat.Format32bppArgb))
+        using (var bmp = new Bitmap(CreatureFrame * 4, CreatureFrame * 9, PixelFormat.Format32bppArgb))
         using (var g = Graphics.FromImage(bmp))
         {
             Configure(g);
@@ -59,6 +59,8 @@ public static class PremiumAssetGenerator
                 DrawCreatureFrame(g, frame, 4, "fox");
                 DrawCreatureFrame(g, frame, 5, "bear");
                 DrawCreatureFrame(g, frame, 6, "vulture");
+                DrawCreatureFrame(g, frame, 7, "lynx");
+                DrawCreatureFrame(g, frame, 8, "panther");
             }
             bmp.Save(path, ImageFormat.Png);
         }
@@ -221,6 +223,8 @@ public static class PremiumAssetGenerator
             case "fox": DrawFox(g, walk); break;
             case "bear": DrawBear(g, walk); break;
             case "vulture": DrawVulture(g, walk); break;
+            case "lynx": DrawLynx(g, walk); break;
+            case "panther": DrawPanther(g, walk); break;
         }
         g.ResetTransform();
     }
@@ -301,6 +305,36 @@ public static class PremiumAssetGenerator
         FillPolygon(g, C(203, 158, 65, 245), new PointF[] { P(168,78), P(186,84), P(168,90) });
         DrawLegs(g, C(60, 48, 35, 220), 72, 130, 92, walk, .5f);
         FillEllipse(g, C(30, 22, 16, 255), 158, 75, 4, 4);
+    }
+
+    private static void DrawLynx(Graphics g, float walk)
+    {
+        DrawLegs(g, C(71, 50, 35, 245), 58, 128, 100, walk, .9f);
+        FillEllipse(g, C(178, 121, 64, 252), 42, 74, 108, 44);
+        FillEllipse(g, C(220, 159, 88, 226), 58, 78, 58, 22);
+        FillEllipse(g, C(169, 110, 57, 252), 136, 68, 40, 30);
+        FillPolygon(g, C(78, 49, 31, 245), new PointF[] { P(145,68), P(148,44), P(158,70) });
+        FillPolygon(g, C(78, 49, 31, 245), new PointF[] { P(165,70), P(174,48), P(174,76) });
+        using (var p = new Pen(C(80, 50, 31, 245), 7f)) { p.StartCap = p.EndCap = LineCap.Round; g.DrawBezier(p, 44, 88, 26, 80, 24, 112, 42, 106); }
+        for (int i = 0; i < 18; i++)
+        {
+            FillEllipse(g, C(62, 42, 28, 155), Rand(56, 138), Rand(78, 108), Rand(2.2f, 4.8f), Rand(1.6f, 3.6f));
+        }
+        using (var p = new Pen(C(233, 225, 203, 200), 2.5f)) { p.StartCap = p.EndCap = LineCap.Round; g.DrawLine(p, 162, 86, 176, 82); g.DrawLine(p, 162, 90, 177, 91); }
+        FillEllipse(g, C(49, 33, 22, 255), 164, 80, 4.5f, 4.5f);
+    }
+
+    private static void DrawPanther(Graphics g, float walk)
+    {
+        DrawLegs(g, C(17, 18, 20, 250), 56, 130, 110, walk, 1.05f);
+        FillEllipse(g, C(25, 28, 31, 255), 38, 76, 118, 42);
+        FillEllipse(g, C(48, 53, 58, 190), 58, 79, 64, 18);
+        FillEllipse(g, C(18, 20, 23, 255), 142, 70, 42, 28);
+        FillPolygon(g, C(12, 14, 16, 248), new PointF[] { P(150,70), P(156,50), P(162,72) });
+        FillPolygon(g, C(12, 14, 16, 248), new PointF[] { P(168,73), P(176,55), P(178,78) });
+        using (var p = new Pen(C(18, 20, 23, 250), 10f)) { p.StartCap = p.EndCap = LineCap.Round; g.DrawBezier(p, 42, 88, 10, 72, 13, 116, 42, 106); }
+        using (var p = new Pen(C(72, 78, 86, 84), 3.4f)) { p.StartCap = p.EndCap = LineCap.Round; g.DrawLine(p, 74, 82, 126, 82); g.DrawLine(p, 62, 94, 132, 96); }
+        FillEllipse(g, C(104, 197, 143, 255), 166, 79, 5, 5);
     }
 
     private static void DrawLegs(Graphics g, Color color, float x, float y, float width, float walk, float scale)

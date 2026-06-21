@@ -31,11 +31,7 @@ const STATS_REFRESH_SECONDS = 1.0;
 interface CreatureVisual {
   x: number;
   y: number;
-  velocityX: number;
-  velocityY: number;
   bobSeed: number;
-  wanderRadius: number;
-  wanderSpeed: number;
   movement: number;
   facingLeft: boolean;
 }
@@ -97,6 +93,8 @@ const speciesLabel: Record<CreatureSpecies, string> = {
   fox: 'キツネ',
   bear: 'クマ',
   vulture: 'ハゲワシ',
+  lynx: 'オオヤマネコ',
+  panther: 'クロヒョウ',
 };
 
 const speciesVisual: Record<CreatureSpecies, { frameOffset: number; size: number; gait: number; color: number }> = {
@@ -107,6 +105,8 @@ const speciesVisual: Record<CreatureSpecies, { frameOffset: number; size: number
   fox: { frameOffset: 16, size: 3.65, gait: 12.2, color: 0xd87937 },
   bear: { frameOffset: 20, size: 5.9, gait: 6.6, color: 0x5b3e2f },
   vulture: { frameOffset: 24, size: 3.55, gait: 9.4, color: 0x2f2b27 },
+  lynx: { frameOffset: 28, size: 3.95, gait: 11.8, color: 0xc5833f },
+  panther: { frameOffset: 32, size: 4.9, gait: 9.6, color: 0x20252c },
 };
 
 export class WorldScene extends Phaser.Scene {
@@ -1109,6 +1109,10 @@ export class WorldScene extends Phaser.Scene {
         return 5.3;
       case 'vulture':
         return 6.9;
+      case 'lynx':
+        return 7.6;
+      case 'panther':
+        return 8.7;
       case 'boar':
         return 8.1;
       case 'deer':
@@ -1164,11 +1168,7 @@ export class WorldScene extends Phaser.Scene {
         visual = {
           x: target.x,
           y: target.y,
-          velocityX: 0,
-          velocityY: 0,
           bobSeed: Phaser.Math.FloatBetween(0, Math.PI * 2),
-          wanderRadius: Phaser.Math.FloatBetween(0.08, 0.22),
-          wanderSpeed: Phaser.Math.FloatBetween(1.1, 1.9),
           movement: 0,
           facingLeft: false,
         };
@@ -1180,76 +1180,35 @@ export class WorldScene extends Phaser.Scene {
       const distance = Math.hypot(dx, dy);
       const previousX = visual.x;
       const previousY = visual.y;
-      const timeSeconds = this.time.now * 0.001;
-      const terrainScale = Math.max(1, this.cellSize);
-      const activeState =
-        creature.state === 'foraging' ||
-        creature.state === 'grazing' ||
-        creature.state === 'browsing' ||
-        creature.state === 'rooting' ||
-        creature.state === 'hunting' ||
-        creature.state === 'scavenging' ||
-        creature.state === 'fleeing' ||
-        creature.state === 'starving' ||
-        creature.state === 'mating';
-      const roamStrength =
-        creature.state === 'fleeing'
-          ? 1.35
-          : creature.state === 'hunting' || creature.state === 'scavenging'
-            ? 1.08
-            : creature.state === 'starving' || creature.sickness > 0.55
-              ? 0.42
-              : 0.82;
-      const roamFade = Phaser.Math.Clamp(1 - distance / Math.max(1, terrainScale * 2.4), 0.15, 1);
-      const roamRadius = terrainScale * visual.wanderRadius * roamStrength * roamFade;
-      const roamAngle = timeSeconds * visual.wanderSpeed + visual.bobSeed;
-      const desiredX =
-        target.x +
-        (Math.cos(roamAngle) * roamRadius + Math.cos(roamAngle * 1.73 + visual.bobSeed) * roamRadius * 0.34);
-      const desiredY =
-        target.y +
-        (Math.sin(roamAngle * 0.82 + visual.bobSeed * 0.31) * roamRadius * 0.68 +
-          Math.sin(roamAngle * 1.31) * roamRadius * 0.2);
       if (distance > this.cellSize * 5) {
-        visual.x = desiredX;
-        visual.y = desiredY;
-        visual.velocityX = 0;
-        visual.velocityY = 0;
+        visual.x = target.x;
+        visual.y = target.y;
       } else {
-        const tracking = distance > this.cellSize * 0.65 ? follow : dt <= 0 ? 1 : 1 - Math.exp(-dt * 5.5);
-        visual.x = Phaser.Math.Linear(visual.x, desiredX, tracking);
-        visual.y = Phaser.Math.Linear(visual.y, desiredY, tracking);
-        const velocityFollow = dt <= 0 ? 1 : 1 - Math.exp(-dt * 16);
-        visual.velocityX = Phaser.Math.Linear(visual.velocityX, (visual.x - previousX) / Math.max(dt, 0.001), velocityFollow);
-        visual.velocityY = Phaser.Math.Linear(visual.velocityY, (visual.y - previousY) / Math.max(dt, 0.001), velocityFollow);
+        visual.x = Phaser.Math.Linear(visual.x, target.x, follow);
+        visual.y = Phaser.Math.Linear(visual.y, target.y, follow);
       }
       const frameMove = Math.hypot(visual.x - previousX, visual.y - previousY);
       const displayMotion = Phaser.Math.Clamp(
-        Math.max(distance / Math.max(1, this.cellSize * 1.35), frameMove / Math.max(0.08, this.cellSize * 0.024), activeState ? 0.18 : 0),
+        Math.max(distance / Math.max(1, this.cellSize * 1.35), frameMove / Math.max(0.08, this.cellSize * 0.024)),
         0,
         1,
       );
       visual.movement = Phaser.Math.Linear(visual.movement, displayMotion, dt <= 0 ? 1 : 1 - Math.exp(-dt * 14));
-      const facingDeltaX = Math.abs(visual.velocityX) > 0.8 ? visual.velocityX : dx;
-      if (Math.abs(facingDeltaX) > this.cellSize * 0.025) {
-        visual.facingLeft = facingDeltaX < 0;
+      if (Math.abs(dx) > this.cellSize * 0.025) {
+        visual.facingLeft = dx < 0;
       }
 
       const visualStyle = speciesVisual[creature.species] ?? speciesVisual.deer;
       const spriteSize = Math.max(22, this.cellSize * visualStyle.size);
       const gaitSpeed = visualStyle.gait;
-      const isMoving = visual.movement > 0.05 || activeState;
+      const isMoving = visual.movement > 0.08;
       const motionFrame = isMoving
         ? Math.floor((this.time.now * 0.001 * gaitSpeed + visual.bobSeed) % CREATURE_MOTION_FRAMES)
         : 0;
       const frameOffset = visualStyle.frameOffset;
       const phase = this.time.now * 0.016 * gaitSpeed + visual.bobSeed;
-      const idleWeight = 1 - visual.movement;
-      const bob =
-        Math.sin(phase) * Math.min(2.2, spriteSize * 0.055) * visual.movement +
-        Math.sin(phase * 0.42) * Math.min(1.2, spriteSize * 0.026) * idleWeight;
-      const sway = Math.cos(phase * 0.34) * Math.min(1.4, this.cellSize * 0.075) * (0.2 + idleWeight * 0.38);
-      const renderX = visual.x + sway;
+      const bob = isMoving ? Math.sin(phase) * Math.min(2.2, spriteSize * 0.055) * visual.movement : 0;
+      const renderX = visual.x;
       const renderY = visual.y + bob;
 
       const showSickness = creature.sickness > 0.38;

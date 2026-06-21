@@ -33,7 +33,7 @@ export interface GridPosition {
 
 export type CreatureKind = 'herbivore' | 'carnivore' | 'omnivore' | 'scavenger';
 
-export type CreatureSpecies = 'hare' | 'deer' | 'boar' | 'wolf' | 'fox' | 'bear' | 'vulture';
+export type CreatureSpecies = 'hare' | 'deer' | 'boar' | 'wolf' | 'fox' | 'bear' | 'vulture' | 'lynx' | 'panther';
 
 export type CreatureState =
   | 'foraging'

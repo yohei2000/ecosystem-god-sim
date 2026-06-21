@@ -13,7 +13,7 @@ import type {
 import { EnvironmentSystem } from './EnvironmentSystem';
 
 const MAX_CREATURES = 420;
-const SPECIES_COUNT = 7;
+const SPECIES_COUNT = 9;
 const TERRITORY_ZOC_BUFFER = 3.5;
 const CREATURE_UPDATE_FRACTION = 0.1;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -133,7 +133,7 @@ const speciesProfiles: Record<CreatureSpecies, SpeciesProfile> = {
     diseaseResistance: 1.02,
     groupRadius: 8,
     territoryRadius: 14,
-    prey: ['hare', 'deer', 'boar', 'fox', 'vulture'],
+    prey: ['hare', 'deer', 'boar', 'fox', 'lynx', 'vulture'],
   },
   fox: {
     kind: 'carnivore',
@@ -158,6 +158,52 @@ const speciesProfiles: Record<CreatureSpecies, SpeciesProfile> = {
     territoryRadius: 10,
     prey: ['hare', 'vulture'],
   },
+  lynx: {
+    kind: 'carnivore',
+    feeding: 'hunter',
+    metabolism: 0.046,
+    moveCooldown: 0.13,
+    reproductionRate: 0.15,
+    reproductionCooldown: 9.6,
+    energyThreshold: 0.98,
+    birthCost: 0.36,
+    childEnergy: 0.72,
+    maxEnergy: 1.68,
+    bite: 0,
+    plantGain: 0,
+    huntGain: 0.66,
+    corpseBite: 0.18,
+    corpseGain: 1.12,
+    corpseNutrients: 0.46,
+    stressResistance: 1.02,
+    diseaseResistance: 1.04,
+    groupRadius: 5.2,
+    territoryRadius: 11.5,
+    prey: ['hare', 'fox', 'vulture'],
+  },
+  panther: {
+    kind: 'carnivore',
+    feeding: 'hunter',
+    metabolism: 0.058,
+    moveCooldown: 0.16,
+    reproductionRate: 0.09,
+    reproductionCooldown: 12.8,
+    energyThreshold: 1.1,
+    birthCost: 0.46,
+    childEnergy: 0.84,
+    maxEnergy: 1.94,
+    bite: 0,
+    plantGain: 0,
+    huntGain: 0.9,
+    corpseBite: 0.24,
+    corpseGain: 1.24,
+    corpseNutrients: 0.68,
+    stressResistance: 1.16,
+    diseaseResistance: 1.08,
+    groupRadius: 6.5,
+    territoryRadius: 13,
+    prey: ['hare', 'deer', 'boar', 'fox', 'lynx', 'vulture'],
+  },
   bear: {
     kind: 'omnivore',
     feeding: 'omnivore',
@@ -178,7 +224,7 @@ const speciesProfiles: Record<CreatureSpecies, SpeciesProfile> = {
     stressResistance: 1.32,
     diseaseResistance: 1.18,
     groupRadius: 5,
-    prey: ['hare', 'deer', 'boar', 'fox', 'wolf'],
+    prey: ['hare', 'deer', 'boar', 'fox', 'wolf', 'lynx'],
   },
   vulture: {
     kind: 'scavenger',
@@ -1268,6 +1314,8 @@ export class CreatureSystem {
     this.spawnCluster('boar', 5, 4, 0.72, 1.12);
     this.spawnCluster('wolf', 5, 3, 0.86, 1.24);
     this.spawnCluster('fox', 6, 3, 0.74, 1.12);
+    this.spawnCluster('lynx', 4, 2, 0.78, 1.16);
+    this.spawnCluster('panther', 3, 2, 0.9, 1.26);
     this.spawnCluster('bear', 5, 1, 0.9, 1.28);
     this.spawnCluster('vulture', 5, 2, 0.62, 1.0);
   }
