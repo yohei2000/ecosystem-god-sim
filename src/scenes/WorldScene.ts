@@ -16,9 +16,17 @@ const TERRAIN_STAMP_FRAME_SIZE = 512;
 const TERRAIN_TEXTURE_CELL_SIZE = 9;
 const CREATURE_FRAME_SIZE = 192;
 const CREATURE_MOTION_FRAMES = 4;
-const TERRAIN_BASE_REFRESH_SECONDS = 1.35;
-const CELL_OVERLAY_REFRESH_SECONDS = 0.34;
+const TERRAIN_BASE_REFRESH_SECONDS = 2.6;
+const CELL_OVERLAY_REFRESH_SECONDS = 0.9;
+const TERRITORY_OVERLAY_REFRESH_SECONDS = 0.55;
+const TERRITORY_MAP_REFRESH_SECONDS = 1.2;
+const ACTOR_EFFECT_REFRESH_SECONDS = 0.8;
 const TERRITORY_OUTLINE_POINTS = 24;
+const ENVIRONMENT_STEP_SECONDS = 0.48;
+const PLANT_STEP_SECONDS = 0.48;
+const CREATURE_STEP_SECONDS = 0.12;
+const MAX_SYSTEM_STEP_SECONDS = 0.2;
+const STATS_REFRESH_SECONDS = 1.0;
 
 interface CreatureVisual {
   x: number;
@@ -107,6 +115,7 @@ export class WorldScene extends Phaser.Scene {
   private cellOverlayGraphics!: Phaser.GameObjects.Graphics;
   private actorGraphics!: Phaser.GameObjects.Graphics;
   private overlayGraphics!: Phaser.GameObjects.Graphics;
+  private territoryGraphics!: Phaser.GameObjects.Graphics;
   private terrainBaseImage?: Phaser.GameObjects.Image;
   private terrainBaseCanvas?: HTMLCanvasElement;
   private terrainBaseContext?: CanvasRenderingContext2D;
@@ -118,10 +127,22 @@ export class WorldScene extends Phaser.Scene {
   private cellOverlayDirty = true;
   private readonly terrainStamps: Phaser.GameObjects.Image[] = [];
   private readonly creatureSprites = new Map<number, Phaser.GameObjects.Image>();
+  private readonly creatureShadows = new Map<number, Phaser.GameObjects.Image>();
+  private readonly creatureSicknessGlows = new Map<number, Phaser.GameObjects.Image>();
+  private readonly creatureAlertRings = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureVisuals = new Map<number, CreatureVisual>();
   private readonly territoryLabels = new Map<CreatureSpecies, Phaser.GameObjects.Text>();
   private readonly territoryOutlineCache = new Map<string, Phaser.Geom.Point[]>();
   private territoryMapMode = false;
+  private territoryOverlayDirty = true;
+  private territoryOverlayTimer = 0;
+  private previousTerritoryMapMode = false;
+  private actorEffectDirty = true;
+  private actorEffectTimer = 0;
+  private creatureSpritesVisible = true;
+  private environmentAccumulator = 0;
+  private plantAccumulator = 0;
+  private creatureAccumulator = 0;
   private cellSize = 12;
   private mapOffsetX = 0;
   private mapOffsetY = 0;
@@ -162,6 +183,7 @@ export class WorldScene extends Phaser.Scene {
       (power) => this.godPowers.setPower(power),
       (enabled) => {
         this.territoryMapMode = enabled;
+        this.territoryOverlayDirty = true;
         this.ui.addLog(enabled ? '縄張り地図を表示' : '通常表示に戻す');
         this.renderWorld(0);
       },
@@ -172,12 +194,15 @@ export class WorldScene extends Phaser.Scene {
     this.cellOverlayGraphics = this.add.graphics();
     this.actorGraphics = this.add.graphics();
     this.overlayGraphics = this.add.graphics();
+    this.territoryGraphics = this.add.graphics();
     this.terrainGraphics.setDepth(0.25);
     this.cellOverlayGraphics.setDepth(1.7);
     this.overlayGraphics.setDepth(2);
+    this.territoryGraphics.setDepth(2.4);
     this.actorGraphics.setDepth(3);
     this.createTerrainBaseTexture();
     this.createMirroredCreatureTexture();
+    this.createActorEffectTextures();
     this.createTerrainStamps();
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -185,6 +210,10 @@ export class WorldScene extends Phaser.Scene {
       if (grid) {
         const power = this.godPowers.selectedPower;
         this.godPowers.applyAt(grid);
+        this.cellOverlayDirty = true;
+        this.actorEffectDirty = true;
+        this.territoryOverlayDirty = true;
+        this.terrainTextureTimer = TERRAIN_BASE_REFRESH_SECONDS;
         this.playGodPowerEffect(power, grid);
       }
     });
@@ -195,17 +224,41 @@ export class WorldScene extends Phaser.Scene {
   }
 
   update(_: number, deltaMs: number): void {
-    const dt = deltaMs / 1000;
-    this.environment.update(dt);
-    this.plants.update(dt);
-    this.creatures.update(dt);
-    this.processCreatureEvents(dt);
+    const dt = Math.min(deltaMs / 1000, 0.08);
+    this.stepSimulation(dt);
     this.renderWorld(dt);
 
     this.statsTimer += dt;
-    if (this.statsTimer > 0.25) {
+    if (this.statsTimer > STATS_REFRESH_SECONDS) {
       this.ui.updateStats(this.creatures.getStats());
       this.statsTimer = 0;
+    }
+  }
+
+  private stepSimulation(dt: number): void {
+    this.environmentAccumulator = Math.min(this.environmentAccumulator + dt, ENVIRONMENT_STEP_SECONDS * 2);
+    this.plantAccumulator = Math.min(this.plantAccumulator + dt, PLANT_STEP_SECONDS * 2);
+    this.creatureAccumulator = Math.min(this.creatureAccumulator + dt, CREATURE_STEP_SECONDS * 2);
+
+    if (this.creatureAccumulator >= CREATURE_STEP_SECONDS) {
+      const step = Math.min(this.creatureAccumulator, MAX_SYSTEM_STEP_SECONDS);
+      this.creatures.update(step);
+      this.processCreatureEvents(step);
+      this.creatureAccumulator = 0;
+      return;
+    }
+
+    if (this.plantAccumulator >= PLANT_STEP_SECONDS) {
+      const step = Math.min(this.plantAccumulator, MAX_SYSTEM_STEP_SECONDS);
+      this.plants.update(step);
+      this.plantAccumulator = 0;
+      return;
+    }
+
+    if (this.environmentAccumulator >= ENVIRONMENT_STEP_SECONDS) {
+      const step = Math.min(this.environmentAccumulator, MAX_SYSTEM_STEP_SECONDS);
+      this.environment.update(step);
+      this.environmentAccumulator = 0;
     }
   }
 
@@ -223,6 +276,8 @@ export class WorldScene extends Phaser.Scene {
     this.mapOffsetX = (width - mapWidth) / 2;
     this.mapOffsetY = edgePadding + (availableHeight - mapHeight) / 2;
     this.cellOverlayDirty = true;
+    this.actorEffectDirty = true;
+    this.territoryOverlayDirty = true;
     this.territoryOutlineCache.clear();
     this.syncTerrainBaseTexture();
     this.syncTerrainStamps();
@@ -333,6 +388,35 @@ export class WorldScene extends Phaser.Scene {
       frameWidth: CREATURE_FRAME_SIZE,
       frameHeight: CREATURE_FRAME_SIZE,
     });
+  }
+
+  private createActorEffectTextures(): void {
+    const size = 96;
+    const graphics = this.add.graphics();
+    graphics.setVisible(false);
+
+    if (!this.textures.exists('creature-shadow')) {
+      graphics.clear();
+      graphics.fillStyle(0x10130f, 0.42);
+      graphics.fillEllipse(size / 2, size / 2, size * 0.78, size * 0.26);
+      graphics.generateTexture('creature-shadow', size, size);
+    }
+
+    if (!this.textures.exists('creature-sick-glow')) {
+      graphics.clear();
+      graphics.fillStyle(0xa8e06f, 0.24);
+      graphics.fillCircle(size / 2, size / 2, size * 0.35);
+      graphics.generateTexture('creature-sick-glow', size, size);
+    }
+
+    if (!this.textures.exists('creature-alert-ring')) {
+      graphics.clear();
+      graphics.lineStyle(4, 0xfff3a0, 0.66);
+      graphics.strokeCircle(size / 2, size / 2, size * 0.34);
+      graphics.generateTexture('creature-alert-ring', size, size);
+    }
+
+    graphics.destroy();
   }
 
   private syncTerrainStamps(): void {
@@ -455,7 +539,13 @@ export class WorldScene extends Phaser.Scene {
 
   private processCreatureEvents(dt: number): void {
     this.eventLogTimer += dt;
-    for (const event of this.creatures.consumeEvents()) {
+    const events = this.creatures.consumeEvents();
+    if (events.length > 0) {
+      this.actorEffectDirty = true;
+      this.territoryOverlayDirty = true;
+    }
+
+    for (const event of events) {
       switch (event.type) {
         case 'birth':
           if (event.species) {
@@ -743,22 +833,60 @@ export class WorldScene extends Phaser.Scene {
     }
 
     this.terrainGraphics.clear();
-    this.actorGraphics.clear();
     this.overlayGraphics.clear();
     this.updateTerrainBaseTexture(dt);
     this.updateCellOverlayGraphics(dt);
     this.drawTerrainBase();
 
     this.drawAtmosphere(dt);
+    this.updateTerritoryGraphics(dt);
+    if (this.territoryMapMode) {
+      this.actorGraphics.setVisible(false);
+      this.hideCreatureSprites();
+    } else {
+      this.actorGraphics.setVisible(true);
+      this.updateActorEffectGraphics(dt);
+      this.drawCreatures(dt);
+    }
+  }
+
+  private updateTerritoryGraphics(dt: number): void {
+    const modeChanged = this.previousTerritoryMapMode !== this.territoryMapMode;
+    if (modeChanged) {
+      this.previousTerritoryMapMode = this.territoryMapMode;
+      this.territoryOverlayDirty = true;
+      if (!this.territoryMapMode) {
+        this.hideTerritoryLabels();
+      }
+    }
+
+    this.territoryOverlayTimer += dt;
+    const refreshSeconds = this.territoryMapMode ? TERRITORY_MAP_REFRESH_SECONDS : TERRITORY_OVERLAY_REFRESH_SECONDS;
+    if (!this.territoryOverlayDirty && this.territoryOverlayTimer < refreshSeconds) {
+      return;
+    }
+
+    this.territoryOverlayTimer = 0;
+    this.territoryOverlayDirty = false;
+    this.territoryGraphics.clear();
     if (this.territoryMapMode) {
       this.drawTerritoryMapOverlay();
-      this.hideCreatureSprites();
     } else {
       this.hideTerritoryLabels();
       this.drawPredatorTerritories();
-      this.drawCorpses();
-      this.drawCreatures(dt);
     }
+  }
+
+  private updateActorEffectGraphics(dt: number): void {
+    this.actorEffectTimer += dt;
+    if (!this.actorEffectDirty && this.actorEffectTimer < ACTOR_EFFECT_REFRESH_SECONDS) {
+      return;
+    }
+
+    this.actorEffectTimer = 0;
+    this.actorEffectDirty = false;
+    this.actorGraphics.clear();
+    this.drawCorpses();
   }
 
   private updateCellOverlayGraphics(dt: number): void {
@@ -872,27 +1000,27 @@ export class WorldScene extends Phaser.Scene {
     const zocOutline = this.createTerritoryOutline(territory, territory.zocRadius);
     const coreOutline = this.createTerritoryOutline(territory, territory.radius);
 
-    this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.08), visualStyle.color, alpha * 0.34);
-    this.overlayGraphics.strokePoints(zocOutline, true, true);
-    this.overlayGraphics.fillStyle(visualStyle.color, alpha * 0.16);
-    this.overlayGraphics.fillPoints(coreOutline, true, true);
-    this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.16), visualStyle.color, alpha);
-    this.overlayGraphics.strokePoints(coreOutline, true, true);
-    this.overlayGraphics.fillStyle(visualStyle.color, alpha * 1.7);
-    this.overlayGraphics.fillCircle(center.x, center.y, Math.max(2, this.cellSize * 0.38));
+    this.territoryGraphics.lineStyle(Math.max(1, this.cellSize * 0.08), visualStyle.color, alpha * 0.34);
+    this.territoryGraphics.strokePoints(zocOutline, true, true);
+    this.territoryGraphics.fillStyle(visualStyle.color, alpha * 0.16);
+    this.territoryGraphics.fillPoints(coreOutline, true, true);
+    this.territoryGraphics.lineStyle(Math.max(1, this.cellSize * 0.16), visualStyle.color, alpha);
+    this.territoryGraphics.strokePoints(coreOutline, true, true);
+    this.territoryGraphics.fillStyle(visualStyle.color, alpha * 1.7);
+    this.territoryGraphics.fillCircle(center.x, center.y, Math.max(2, this.cellSize * 0.38));
 
     if (territory.pressure > 0.42) {
       const pressureOutline = this.createTerritoryOutline(territory, territory.radius * (0.9 + pulse * 0.04), 0.92);
-      this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.12), 0xff705c, alpha * (0.55 + pulse * 0.55));
-      this.overlayGraphics.strokePoints(pressureOutline, true, true);
+      this.territoryGraphics.lineStyle(Math.max(1, this.cellSize * 0.12), 0xff705c, alpha * (0.55 + pulse * 0.55));
+      this.territoryGraphics.strokePoints(pressureOutline, true, true);
     }
   }
 
   private drawTerritoryMapOverlay(): void {
     const mapWidth = this.cellSize * GRID_WIDTH;
     const mapHeight = this.cellSize * GRID_HEIGHT;
-    this.overlayGraphics.fillStyle(0x06100d, 0.54);
-    this.overlayGraphics.fillRect(this.mapOffsetX, this.mapOffsetY, mapWidth, mapHeight);
+    this.territoryGraphics.fillStyle(0x06100d, 0.54);
+    this.territoryGraphics.fillRect(this.mapOffsetX, this.mapOffsetY, mapWidth, mapHeight);
 
     const visibleLabels = new Set<CreatureSpecies>();
     for (const territory of this.creatures.getPredatorTerritories()) {
@@ -905,31 +1033,29 @@ export class WorldScene extends Phaser.Scene {
       const zocOutline = this.createTerritoryOutline(territory, territory.zocRadius);
       const coreOutline = this.createTerritoryOutline(territory, territory.radius);
 
-      this.overlayGraphics.fillStyle(visualStyle.color, alpha * 0.18);
-      this.overlayGraphics.fillPoints(zocOutline, true, true);
-      this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.18), 0xf4ecd5, 0.2);
-      this.overlayGraphics.strokePoints(zocOutline, true, true);
-      this.overlayGraphics.fillStyle(visualStyle.color, alpha);
-      this.overlayGraphics.fillPoints(coreOutline, true, true);
-      this.overlayGraphics.lineStyle(Math.max(2, this.cellSize * 0.32), visualStyle.color, 0.72);
-      this.overlayGraphics.strokePoints(coreOutline, true, true);
-      this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.16), 0xf6efd8, 0.26);
-      this.overlayGraphics.strokePoints(this.createTerritoryOutline(territory, territory.radius * 0.56, 0.74), true, true);
-      this.overlayGraphics.fillStyle(visualStyle.color, 0.95);
-      this.overlayGraphics.fillCircle(center.x, center.y, Math.max(4, this.cellSize * 0.7));
+      this.territoryGraphics.fillStyle(visualStyle.color, alpha * 0.18);
+      this.territoryGraphics.fillPoints(zocOutline, true, true);
+      this.territoryGraphics.lineStyle(Math.max(1, this.cellSize * 0.18), 0xf4ecd5, 0.2);
+      this.territoryGraphics.strokePoints(zocOutline, true, true);
+      this.territoryGraphics.fillStyle(visualStyle.color, alpha);
+      this.territoryGraphics.fillPoints(coreOutline, true, true);
+      this.territoryGraphics.lineStyle(Math.max(2, this.cellSize * 0.32), visualStyle.color, 0.72);
+      this.territoryGraphics.strokePoints(coreOutline, true, true);
+      this.territoryGraphics.lineStyle(Math.max(1, this.cellSize * 0.16), 0xf6efd8, 0.26);
+      this.territoryGraphics.strokePoints(this.createTerritoryOutline(territory, territory.radius * 0.56, 0.74), true, true);
+      this.territoryGraphics.fillStyle(visualStyle.color, 0.95);
+      this.territoryGraphics.fillCircle(center.x, center.y, Math.max(4, this.cellSize * 0.7));
 
       if (conflict > 0.05) {
         const conflictOutline = this.createTerritoryOutline(territory, territory.radius * (0.92 + pulse * 0.05), 0.9);
-        this.overlayGraphics.lineStyle(Math.max(1.5, this.cellSize * 0.22), 0xff624f, 0.35 + conflict * 0.5 * (0.75 + pulse * 0.25));
-        this.overlayGraphics.strokePoints(conflictOutline, true, true);
+        this.territoryGraphics.lineStyle(Math.max(1.5, this.cellSize * 0.22), 0xff624f, 0.35 + conflict * 0.5 * (0.75 + pulse * 0.25));
+        this.territoryGraphics.strokePoints(conflictOutline, true, true);
       }
 
       visibleLabels.add(territory.species);
       this.updateTerritoryLabel(territory, center, radius);
     }
     this.hideTerritoryLabels(visibleLabels);
-
-    this.drawTerritoryMapPredatorMarkers();
   }
 
   private drawTerritoryMapPredatorMarkers(): void {
@@ -940,12 +1066,12 @@ export class WorldScene extends Phaser.Scene {
       const center = this.gridToWorldCenter(creature);
       const visualStyle = speciesVisual[creature.species] ?? speciesVisual.wolf;
       const radius = Math.max(2.5, this.cellSize * (creature.species === 'fox' ? 0.45 : 0.58));
-      this.overlayGraphics.fillStyle(0x070907, 0.7);
-      this.overlayGraphics.fillCircle(center.x + radius * 0.28, center.y + radius * 0.28, radius * 1.12);
-      this.overlayGraphics.fillStyle(visualStyle.color, 0.95);
-      this.overlayGraphics.fillCircle(center.x, center.y, radius);
-      this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.12), 0xf7f1d6, 0.58);
-      this.overlayGraphics.strokeCircle(center.x, center.y, radius * 1.35);
+      this.territoryGraphics.fillStyle(0x070907, 0.7);
+      this.territoryGraphics.fillCircle(center.x + radius * 0.28, center.y + radius * 0.28, radius * 1.12);
+      this.territoryGraphics.fillStyle(visualStyle.color, 0.95);
+      this.territoryGraphics.fillCircle(center.x, center.y, radius);
+      this.territoryGraphics.lineStyle(Math.max(1, this.cellSize * 0.12), 0xf7f1d6, 0.58);
+      this.territoryGraphics.strokeCircle(center.x, center.y, radius * 1.35);
     }
   }
 
@@ -1031,7 +1157,8 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private drawCreatures(dt: number): void {
-    const follow = dt <= 0 ? 1 : 1 - Math.exp(-dt * 13);
+    this.creatureSpritesVisible = true;
+    const follow = dt <= 0 ? 1 : 1 - Math.exp(-dt * 8.5);
     const aliveIds = new Set<number>();
 
     for (const creature of this.creatures.creatures) {
@@ -1075,35 +1202,60 @@ export class WorldScene extends Phaser.Scene {
         ? Math.floor((this.time.now * 0.001 * gaitSpeed + visual.bobSeed) % CREATURE_MOTION_FRAMES)
         : 0;
       const frameOffset = visualStyle.frameOffset;
-      const bob = Math.sin(this.time.now * 0.016 * gaitSpeed + visual.bobSeed) * Math.min(2.2, spriteSize * 0.055) * visual.movement;
-      this.actorGraphics.fillStyle(0x10130f, creature.state === 'fleeing' ? 0.3 : 0.22);
-      this.actorGraphics.fillEllipse(visual.x, visual.y + spriteSize * 0.18, shadowWidth, shadowHeight);
+      const phase = this.time.now * 0.016 * gaitSpeed + visual.bobSeed;
+      const idleWeight = 1 - visual.movement;
+      const bob =
+        Math.sin(phase) * Math.min(2.2, spriteSize * 0.055) * visual.movement +
+        Math.sin(phase * 0.42) * Math.min(1.2, spriteSize * 0.026) * idleWeight;
+      const sway = Math.cos(phase * 0.34) * Math.min(1.4, this.cellSize * 0.075) * (0.2 + idleWeight * 0.38);
+      const renderX = visual.x + sway;
+      const renderY = visual.y + bob;
 
-      if (creature.sickness > 0.38) {
-        this.actorGraphics.fillStyle(0xa8e06f, 0.24);
-        this.actorGraphics.fillCircle(visual.x, visual.y - spriteSize * 0.18, Math.max(3, spriteSize * 0.16));
+      const shadow = this.getCreatureEffectSprite(this.creatureShadows, creature.id, 'creature-shadow', 3);
+      shadow.setVisible(true);
+      shadow.setPosition(renderX, visual.y + spriteSize * 0.18);
+      shadow.setDisplaySize(shadowWidth, shadowHeight);
+      shadow.setAlpha(creature.state === 'fleeing' ? 0.72 : 0.54);
+
+      const showSickness = creature.sickness > 0.38;
+      if (showSickness) {
+        const sicknessGlow = this.getCreatureEffectSprite(this.creatureSicknessGlows, creature.id, 'creature-sick-glow', 4.2);
+        sicknessGlow.setVisible(true);
+        sicknessGlow.setPosition(renderX, renderY - spriteSize * 0.18);
+        sicknessGlow.setDisplaySize(spriteSize * 0.6, spriteSize * 0.6);
+        sicknessGlow.setAlpha(Phaser.Math.Clamp((creature.sickness - 0.28) * 0.9, 0.12, 0.42));
+      } else {
+        this.creatureSicknessGlows.get(creature.id)?.setVisible(false);
       }
-      if (creature.state === 'fleeing') {
-        this.actorGraphics.lineStyle(1, 0xfff3a0, 0.48);
-        this.actorGraphics.strokeCircle(visual.x, visual.y, spriteSize * 0.48);
+
+      const showAlert = creature.state === 'fleeing';
+      if (showAlert) {
+        const alertRing = this.getCreatureEffectSprite(this.creatureAlertRings, creature.id, 'creature-alert-ring', 4.25);
+        alertRing.setVisible(true);
+        alertRing.setPosition(renderX, renderY);
+        alertRing.setDisplaySize(spriteSize * 1.08, spriteSize * 1.08);
+        alertRing.setAlpha(0.48);
+      } else {
+        this.creatureAlertRings.get(creature.id)?.setVisible(false);
       }
 
       let sprite = this.creatureSprites.get(creature.id);
       if (!sprite) {
         const textureKey = visual.facingLeft ? 'creatures-left' : 'creatures';
-        sprite = this.add.image(visual.x, visual.y, textureKey, frameOffset + motionFrame);
+        sprite = this.add.image(renderX, renderY, textureKey, frameOffset + motionFrame);
         sprite.setDepth(4);
         this.creatureSprites.set(creature.id, sprite);
       }
 
       sprite.setVisible(true);
       const textureKey = visual.facingLeft ? 'creatures-left' : 'creatures';
+      const frame = frameOffset + motionFrame;
       if (sprite.texture.key !== textureKey) {
-        sprite.setTexture(textureKey, frameOffset + motionFrame);
-      } else {
-        sprite.setFrame(frameOffset + motionFrame);
+        sprite.setTexture(textureKey, frame);
+      } else if (sprite.frame.name !== String(frame)) {
+        sprite.setFrame(frame);
       }
-      sprite.setPosition(visual.x, visual.y + bob);
+      sprite.setPosition(renderX, renderY);
       sprite.setDisplaySize(spriteSize, spriteSize);
       sprite.setFlipX(false);
       sprite.setRotation(0);
@@ -1122,16 +1274,54 @@ export class WorldScene extends Phaser.Scene {
       if (!aliveIds.has(id)) {
         sprite.destroy();
         this.creatureSprites.delete(id);
+        this.destroyCreatureEffectSprite(this.creatureShadows, id);
+        this.destroyCreatureEffectSprite(this.creatureSicknessGlows, id);
+        this.destroyCreatureEffectSprite(this.creatureAlertRings, id);
         this.creatureVisuals.delete(id);
       }
     }
   }
 
+  private getCreatureEffectSprite(
+    store: Map<number, Phaser.GameObjects.Image>,
+    id: number,
+    textureKey: string,
+    depth: number,
+  ): Phaser.GameObjects.Image {
+    let sprite = store.get(id);
+    if (!sprite) {
+      sprite = this.add.image(0, 0, textureKey);
+      sprite.setDepth(depth);
+      store.set(id, sprite);
+    }
+    return sprite;
+  }
+
+  private destroyCreatureEffectSprite(store: Map<number, Phaser.GameObjects.Image>, id: number): void {
+    const sprite = store.get(id);
+    if (sprite) {
+      sprite.destroy();
+      store.delete(id);
+    }
+  }
+
   private hideCreatureSprites(): void {
+    if (!this.creatureSpritesVisible) {
+      return;
+    }
+    this.creatureSpritesVisible = false;
     for (const sprite of this.creatureSprites.values()) {
       sprite.setVisible(false);
     }
-    this.actorGraphics.clear();
+    for (const sprite of this.creatureShadows.values()) {
+      sprite.setVisible(false);
+    }
+    for (const sprite of this.creatureSicknessGlows.values()) {
+      sprite.setVisible(false);
+    }
+    for (const sprite of this.creatureAlertRings.values()) {
+      sprite.setVisible(false);
+    }
   }
 
   private drawCorpses(): void {

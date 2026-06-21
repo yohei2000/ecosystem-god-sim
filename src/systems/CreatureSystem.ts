@@ -15,6 +15,7 @@ import { EnvironmentSystem } from './EnvironmentSystem';
 const MAX_CREATURES = 420;
 const SPECIES_COUNT = 7;
 const TERRITORY_ZOC_BUFFER = 3.5;
+const CREATURE_UPDATE_FRACTION = 0.1;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
 
@@ -210,6 +211,7 @@ export class CreatureSystem {
   private readonly territories = new Map<CreatureSpecies, CreatureTerritory>();
   private nextId = 1;
   private nextPackId = 1;
+  private updateCursor = 0;
 
   constructor(private readonly environment: EnvironmentSystem) {
     this.spawnInitialPopulation();
@@ -221,12 +223,19 @@ export class CreatureSystem {
     this.updateTerritories(dt);
     const climate = this.environment.getClimate();
 
-    for (const creature of [...this.creatures]) {
+    const snapshot = [...this.creatures];
+    const batchSize = Math.max(8, Math.ceil(snapshot.length * CREATURE_UPDATE_FRACTION));
+    const effectiveDt = snapshot.length > batchSize ? Math.min(dt * (snapshot.length / batchSize), 0.25) : dt;
+    for (let offset = 0; offset < batchSize && offset < snapshot.length; offset += 1) {
+      const creature = snapshot[(this.updateCursor + offset) % snapshot.length];
+      if (!this.creatures.includes(creature)) {
+        continue;
+      }
       const profile = speciesProfiles[creature.species];
       creature.kind = profile.kind;
-      creature.age += dt;
-      creature.moveCooldown -= dt;
-      creature.reproductionCooldown = Math.max(0, creature.reproductionCooldown - dt);
+      creature.age += effectiveDt;
+      creature.moveCooldown -= effectiveDt;
+      creature.reproductionCooldown = Math.max(0, creature.reproductionCooldown - effectiveDt);
 
       const cell = this.environment.getCell(creature.x, creature.y);
       const terrainStress =
@@ -241,14 +250,14 @@ export class CreatureSystem {
             : climate.weather === 'drought'
               ? 0.06
               : 0;
-      creature.stress = clamp01(creature.stress + ((terrainStress + weatherStress) / profile.stressResistance) * dt - 0.05 * dt);
-      this.applyTerritoryStress(creature, profile, dt);
+      creature.stress = clamp01(creature.stress + ((terrainStress + weatherStress) / profile.stressResistance) * effectiveDt - 0.05 * effectiveDt);
+      this.applyTerritoryStress(creature, profile, effectiveDt);
       creature.sickness = clamp01(
-        creature.sickness + (this.sicknessPressure(creature) / profile.diseaseResistance) * dt - this.recoveryRate(creature) * dt,
+        creature.sickness + (this.sicknessPressure(creature) / profile.diseaseResistance) * effectiveDt - this.recoveryRate(creature) * effectiveDt,
       );
 
-      creature.energy -= (profile.metabolism + creature.stress * 0.048 + creature.sickness * 0.075) * dt;
-      if (creature.sickness > 0.72 && Math.random() < 0.01 * dt) {
+      creature.energy -= (profile.metabolism + creature.stress * 0.048 + creature.sickness * 0.075) * effectiveDt;
+      if (creature.sickness > 0.72 && Math.random() < 0.01 * effectiveDt) {
         this.events.push({ type: 'outbreak', kind: creature.kind, species: creature.species, x: creature.x, y: creature.y });
       }
 
@@ -257,12 +266,13 @@ export class CreatureSystem {
         creature.moveCooldown = profile.moveCooldown + creature.stress * 0.08 + creature.sickness * 0.08;
       }
 
-      this.tryReproduce(creature, dt);
+      this.tryReproduce(creature, effectiveDt);
 
       if (creature.energy <= 0) {
         this.killCreature(creature, creature.sickness > 0.6 ? 'outbreak' : 'death');
       }
     }
+    this.updateCursor = snapshot.length > 0 ? (this.updateCursor + batchSize) % snapshot.length : 0;
   }
 
   killCreaturesInRadius(center: GridPosition, radius: number): number {
