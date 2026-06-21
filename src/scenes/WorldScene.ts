@@ -31,8 +31,7 @@ const STATS_REFRESH_SECONDS = 1.0;
 interface CreatureVisual {
   x: number;
   y: number;
-  bobSeed: number;
-  movement: number;
+  animationSeed: number;
   facingLeft: boolean;
 }
 
@@ -1168,8 +1167,7 @@ export class WorldScene extends Phaser.Scene {
         visual = {
           x: target.x,
           y: target.y,
-          bobSeed: Phaser.Math.FloatBetween(0, Math.PI * 2),
-          movement: 0,
+          animationSeed: Phaser.Math.FloatBetween(0, Math.PI * 2),
           facingLeft: false,
         };
         this.creatureVisuals.set(creature.id, visual);
@@ -1180,7 +1178,11 @@ export class WorldScene extends Phaser.Scene {
       const distance = Math.hypot(dx, dy);
       const previousX = visual.x;
       const previousY = visual.y;
-      if (distance > this.cellSize * 5) {
+      const snapDistance = Math.max(0.25, this.cellSize * 0.035);
+      if (distance <= snapDistance) {
+        visual.x = target.x;
+        visual.y = target.y;
+      } else if (distance > this.cellSize * 5) {
         visual.x = target.x;
         visual.y = target.y;
       } else {
@@ -1188,12 +1190,6 @@ export class WorldScene extends Phaser.Scene {
         visual.y = Phaser.Math.Linear(visual.y, target.y, follow);
       }
       const frameMove = Math.hypot(visual.x - previousX, visual.y - previousY);
-      const displayMotion = Phaser.Math.Clamp(
-        Math.max(distance / Math.max(1, this.cellSize * 1.35), frameMove / Math.max(0.08, this.cellSize * 0.024)),
-        0,
-        1,
-      );
-      visual.movement = Phaser.Math.Linear(visual.movement, displayMotion, dt <= 0 ? 1 : 1 - Math.exp(-dt * 14));
       if (Math.abs(dx) > this.cellSize * 0.025) {
         visual.facingLeft = dx < 0;
       }
@@ -1201,15 +1197,13 @@ export class WorldScene extends Phaser.Scene {
       const visualStyle = speciesVisual[creature.species] ?? speciesVisual.deer;
       const spriteSize = Math.max(22, this.cellSize * visualStyle.size);
       const gaitSpeed = visualStyle.gait;
-      const isMoving = visual.movement > 0.08;
+      const isMoving = distance > this.cellSize * 0.08 || frameMove > 0.12;
       const motionFrame = isMoving
-        ? Math.floor((this.time.now * 0.001 * gaitSpeed + visual.bobSeed) % CREATURE_MOTION_FRAMES)
+        ? Math.floor((this.time.now * 0.001 * gaitSpeed + visual.animationSeed) % CREATURE_MOTION_FRAMES)
         : 0;
       const frameOffset = visualStyle.frameOffset;
-      const phase = this.time.now * 0.016 * gaitSpeed + visual.bobSeed;
-      const bob = isMoving ? Math.sin(phase) * Math.min(2.2, spriteSize * 0.055) * visual.movement : 0;
       const renderX = visual.x;
-      const renderY = visual.y + bob;
+      const renderY = visual.y;
 
       const showSickness = creature.sickness > 0.38;
       if (showSickness) {
