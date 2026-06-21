@@ -16,22 +16,26 @@ const TERRAIN_STAMP_FRAME_SIZE = 512;
 const TERRAIN_TEXTURE_CELL_SIZE = 9;
 const CREATURE_FRAME_SIZE = 192;
 const CREATURE_MOTION_FRAMES = 4;
-const TERRAIN_BASE_REFRESH_SECONDS = 2.6;
-const CELL_OVERLAY_REFRESH_SECONDS = 0.9;
-const TERRITORY_OVERLAY_REFRESH_SECONDS = 0.55;
-const TERRITORY_MAP_REFRESH_SECONDS = 1.2;
-const ACTOR_EFFECT_REFRESH_SECONDS = 0.8;
+const TERRAIN_BASE_REFRESH_SECONDS = 6.0;
+const CELL_OVERLAY_REFRESH_SECONDS = 5.0;
+const TERRITORY_OVERLAY_REFRESH_SECONDS = 1.5;
+const TERRITORY_MAP_REFRESH_SECONDS = 2.5;
+const ACTOR_EFFECT_REFRESH_SECONDS = 1.5;
 const TERRITORY_OUTLINE_POINTS = 24;
 const ENVIRONMENT_STEP_SECONDS = 0.48;
 const PLANT_STEP_SECONDS = 0.48;
-const CREATURE_STEP_SECONDS = 0.12;
-const MAX_SYSTEM_STEP_SECONDS = 0.2;
+const CREATURE_STEP_SECONDS = 0.08;
+const MAX_SYSTEM_STEP_SECONDS = 0.14;
 const STATS_REFRESH_SECONDS = 1.0;
 
 interface CreatureVisual {
   x: number;
   y: number;
+  velocityX: number;
+  velocityY: number;
   bobSeed: number;
+  wanderRadius: number;
+  wanderSpeed: number;
   movement: number;
   facingLeft: boolean;
 }
@@ -127,7 +131,6 @@ export class WorldScene extends Phaser.Scene {
   private cellOverlayDirty = true;
   private readonly terrainStamps: Phaser.GameObjects.Image[] = [];
   private readonly creatureSprites = new Map<number, Phaser.GameObjects.Image>();
-  private readonly creatureShadows = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureSicknessGlows = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureAlertRings = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureVisuals = new Map<number, CreatureVisual>();
@@ -394,13 +397,6 @@ export class WorldScene extends Phaser.Scene {
     const size = 96;
     const graphics = this.add.graphics();
     graphics.setVisible(false);
-
-    if (!this.textures.exists('creature-shadow')) {
-      graphics.clear();
-      graphics.fillStyle(0x10130f, 0.42);
-      graphics.fillEllipse(size / 2, size / 2, size * 0.78, size * 0.26);
-      graphics.generateTexture('creature-shadow', size, size);
-    }
 
     if (!this.textures.exists('creature-sick-glow')) {
       graphics.clear();
@@ -1168,7 +1164,11 @@ export class WorldScene extends Phaser.Scene {
         visual = {
           x: target.x,
           y: target.y,
+          velocityX: 0,
+          velocityY: 0,
           bobSeed: Phaser.Math.FloatBetween(0, Math.PI * 2),
+          wanderRadius: Phaser.Math.FloatBetween(0.08, 0.22),
+          wanderSpeed: Phaser.Math.FloatBetween(1.1, 1.9),
           movement: 0,
           facingLeft: false,
         };
@@ -1178,26 +1178,67 @@ export class WorldScene extends Phaser.Scene {
       const dx = target.x - visual.x;
       const dy = target.y - visual.y;
       const distance = Math.hypot(dx, dy);
+      const previousX = visual.x;
+      const previousY = visual.y;
+      const timeSeconds = this.time.now * 0.001;
+      const terrainScale = Math.max(1, this.cellSize);
+      const activeState =
+        creature.state === 'foraging' ||
+        creature.state === 'grazing' ||
+        creature.state === 'browsing' ||
+        creature.state === 'rooting' ||
+        creature.state === 'hunting' ||
+        creature.state === 'scavenging' ||
+        creature.state === 'fleeing' ||
+        creature.state === 'starving' ||
+        creature.state === 'mating';
+      const roamStrength =
+        creature.state === 'fleeing'
+          ? 1.35
+          : creature.state === 'hunting' || creature.state === 'scavenging'
+            ? 1.08
+            : creature.state === 'starving' || creature.sickness > 0.55
+              ? 0.42
+              : 0.82;
+      const roamFade = Phaser.Math.Clamp(1 - distance / Math.max(1, terrainScale * 2.4), 0.15, 1);
+      const roamRadius = terrainScale * visual.wanderRadius * roamStrength * roamFade;
+      const roamAngle = timeSeconds * visual.wanderSpeed + visual.bobSeed;
+      const desiredX =
+        target.x +
+        (Math.cos(roamAngle) * roamRadius + Math.cos(roamAngle * 1.73 + visual.bobSeed) * roamRadius * 0.34);
+      const desiredY =
+        target.y +
+        (Math.sin(roamAngle * 0.82 + visual.bobSeed * 0.31) * roamRadius * 0.68 +
+          Math.sin(roamAngle * 1.31) * roamRadius * 0.2);
       if (distance > this.cellSize * 5) {
-        visual.x = target.x;
-        visual.y = target.y;
+        visual.x = desiredX;
+        visual.y = desiredY;
+        visual.velocityX = 0;
+        visual.velocityY = 0;
       } else {
-        visual.x = Phaser.Math.Linear(visual.x, target.x, follow);
-        visual.y = Phaser.Math.Linear(visual.y, target.y, follow);
+        const tracking = distance > this.cellSize * 0.65 ? follow : dt <= 0 ? 1 : 1 - Math.exp(-dt * 5.5);
+        visual.x = Phaser.Math.Linear(visual.x, desiredX, tracking);
+        visual.y = Phaser.Math.Linear(visual.y, desiredY, tracking);
+        const velocityFollow = dt <= 0 ? 1 : 1 - Math.exp(-dt * 16);
+        visual.velocityX = Phaser.Math.Linear(visual.velocityX, (visual.x - previousX) / Math.max(dt, 0.001), velocityFollow);
+        visual.velocityY = Phaser.Math.Linear(visual.velocityY, (visual.y - previousY) / Math.max(dt, 0.001), velocityFollow);
       }
-      visual.movement = Phaser.Math.Linear(visual.movement, Math.min(1, distance / Math.max(1, this.cellSize * 1.8)), dt <= 0 ? 1 : dt * 12);
-      if (distance > 0.02) {
-        if (Math.abs(dx) > this.cellSize * 0.04) {
-          visual.facingLeft = dx < 0;
-        }
+      const frameMove = Math.hypot(visual.x - previousX, visual.y - previousY);
+      const displayMotion = Phaser.Math.Clamp(
+        Math.max(distance / Math.max(1, this.cellSize * 1.35), frameMove / Math.max(0.08, this.cellSize * 0.024), activeState ? 0.18 : 0),
+        0,
+        1,
+      );
+      visual.movement = Phaser.Math.Linear(visual.movement, displayMotion, dt <= 0 ? 1 : 1 - Math.exp(-dt * 14));
+      const facingDeltaX = Math.abs(visual.velocityX) > 0.8 ? visual.velocityX : dx;
+      if (Math.abs(facingDeltaX) > this.cellSize * 0.025) {
+        visual.facingLeft = facingDeltaX < 0;
       }
 
       const visualStyle = speciesVisual[creature.species] ?? speciesVisual.deer;
       const spriteSize = Math.max(22, this.cellSize * visualStyle.size);
-      const shadowWidth = Math.max(16, spriteSize * 0.82);
-      const shadowHeight = Math.max(6, spriteSize * 0.28);
       const gaitSpeed = visualStyle.gait;
-      const isMoving = visual.movement > 0.08;
+      const isMoving = visual.movement > 0.05 || activeState;
       const motionFrame = isMoving
         ? Math.floor((this.time.now * 0.001 * gaitSpeed + visual.bobSeed) % CREATURE_MOTION_FRAMES)
         : 0;
@@ -1210,12 +1251,6 @@ export class WorldScene extends Phaser.Scene {
       const sway = Math.cos(phase * 0.34) * Math.min(1.4, this.cellSize * 0.075) * (0.2 + idleWeight * 0.38);
       const renderX = visual.x + sway;
       const renderY = visual.y + bob;
-
-      const shadow = this.getCreatureEffectSprite(this.creatureShadows, creature.id, 'creature-shadow', 3);
-      shadow.setVisible(true);
-      shadow.setPosition(renderX, visual.y + spriteSize * 0.18);
-      shadow.setDisplaySize(shadowWidth, shadowHeight);
-      shadow.setAlpha(creature.state === 'fleeing' ? 0.72 : 0.54);
 
       const showSickness = creature.sickness > 0.38;
       if (showSickness) {
@@ -1274,7 +1309,6 @@ export class WorldScene extends Phaser.Scene {
       if (!aliveIds.has(id)) {
         sprite.destroy();
         this.creatureSprites.delete(id);
-        this.destroyCreatureEffectSprite(this.creatureShadows, id);
         this.destroyCreatureEffectSprite(this.creatureSicknessGlows, id);
         this.destroyCreatureEffectSprite(this.creatureAlertRings, id);
         this.creatureVisuals.delete(id);
@@ -1311,9 +1345,6 @@ export class WorldScene extends Phaser.Scene {
     }
     this.creatureSpritesVisible = false;
     for (const sprite of this.creatureSprites.values()) {
-      sprite.setVisible(false);
-    }
-    for (const sprite of this.creatureShadows.values()) {
       sprite.setVisible(false);
     }
     for (const sprite of this.creatureSicknessGlows.values()) {

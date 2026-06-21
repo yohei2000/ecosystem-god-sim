@@ -7,6 +7,11 @@ const config: Phaser.Types.Core.GameConfig = {
   parent: 'app',
   backgroundColor: '#101810',
   pixelArt: false,
+  fps: {
+    target: 60,
+    min: 30,
+    smoothStep: true,
+  },
   scale: {
     mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH,
