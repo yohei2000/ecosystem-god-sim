@@ -20,8 +20,8 @@ const CREATURE_MOTION_FRAMES = 4;
 const EFFECT_FRAME_SIZE = 256;
 const TERRAIN_BASE_REFRESH_SECONDS = 6.0;
 const CELL_OVERLAY_REFRESH_SECONDS = 5.0;
-const TERRITORY_OVERLAY_REFRESH_SECONDS = 1.5;
-const TERRITORY_MAP_REFRESH_SECONDS = 2.5;
+const TERRITORY_OVERLAY_REFRESH_SECONDS = 0.16;
+const TERRITORY_MAP_REFRESH_SECONDS = 0.16;
 const ACTOR_EFFECT_REFRESH_SECONDS = 1.5;
 const TERRITORY_OUTLINE_POINTS = 24;
 const ENVIRONMENT_STEP_SECONDS = 0.48;
@@ -1119,14 +1119,73 @@ export class WorldScene extends Phaser.Scene {
       this.territoryOutlineCache.set(cacheKey, points);
     }
 
+    const members = this.creatures.creatures.filter((creature) => creature.species === territory.species);
+    const radii = new Array<number>(TERRITORY_OUTLINE_POINTS);
     for (let i = 0; i < TERRITORY_OUTLINE_POINTS; i += 1) {
       const angle = (Math.PI * 2 * i) / TERRITORY_OUTLINE_POINTS;
-      const factor = this.territoryShapeFactor(territory, angle, roughness);
-      const radius = radiusInCells * this.cellSize * factor;
+      radii[i] = this.dynamicTerritoryRadius(territory, members, angle, radiusInCells, roughness);
+    }
+    this.smoothTerritoryRadii(radii);
+
+    for (let i = 0; i < TERRITORY_OUTLINE_POINTS; i += 1) {
+      const angle = (Math.PI * 2 * i) / TERRITORY_OUTLINE_POINTS;
+      const radius = radii[i] * this.cellSize;
       points[i].x = center.x + Math.cos(angle) * radius;
       points[i].y = center.y + Math.sin(angle) * radius;
     }
     return points;
+  }
+
+  private dynamicTerritoryRadius(
+    territory: CreatureTerritory,
+    members: GridPosition[],
+    angle: number,
+    radiusInCells: number,
+    roughness: number,
+  ): number {
+    const base = radiusInCells * this.territoryShapeFactor(territory, angle, roughness * 0.72);
+    const zocExtra = Math.max(0, radiusInCells - territory.radius);
+    const memberRadius = this.memberTerritoryRadiusAtAngle(territory, members, angle) + zocExtra;
+    const pressurePush = territory.pressure > 0.42 ? Math.sin(angle * 2 + territory.packId) * 0.035 * territory.pressure : 0;
+    const blended = Phaser.Math.Linear(base, Math.max(base * 0.72, memberRadius), 0.62);
+    return Phaser.Math.Clamp(blended * (1 + pressurePush), radiusInCells * 0.62, radiusInCells * 1.28);
+  }
+
+  private memberTerritoryRadiusAtAngle(territory: CreatureTerritory, members: GridPosition[], angle: number): number {
+    if (members.length === 0) {
+      return territory.radius * 0.72;
+    }
+
+    const dx = Math.cos(angle);
+    const dy = Math.sin(angle);
+    const lateralWidth = Math.max(2.5, territory.radius * 0.34);
+    let envelope = territory.radius * 0.52;
+
+    for (const member of members) {
+      const mx = member.x - territory.x;
+      const my = member.y - territory.y;
+      const projection = mx * dx + my * dy;
+      const lateral = Math.abs(mx * -dy + my * dx);
+      if (projection < -lateralWidth * 0.4 || lateral > lateralWidth * 1.35) {
+        continue;
+      }
+
+      const lateralWeight = Phaser.Math.Clamp(1 - lateral / (lateralWidth * 1.35), 0, 1);
+      const individualInfluence = lateralWidth * (0.42 + lateralWeight * 0.5);
+      envelope = Math.max(envelope, projection + individualInfluence);
+    }
+
+    return Phaser.Math.Clamp(envelope, territory.radius * 0.45, territory.radius * 1.2);
+  }
+
+  private smoothTerritoryRadii(radii: number[]): void {
+    const original = [...radii];
+    for (let i = 0; i < radii.length; i += 1) {
+      const previous = original[(i - 1 + original.length) % original.length];
+      const current = original[i];
+      const next = original[(i + 1) % original.length];
+      radii[i] = previous * 0.24 + current * 0.52 + next * 0.24;
+    }
   }
 
   private territoryShapeFactor(territory: CreatureTerritory, angle: number, roughness: number): number {
