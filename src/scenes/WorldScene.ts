@@ -113,6 +113,7 @@ export class WorldScene extends Phaser.Scene {
   private readonly terrainStamps: Phaser.GameObjects.Image[] = [];
   private readonly creatureSprites = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureVisuals = new Map<number, CreatureVisual>();
+  private readonly territoryLabels = new Map<CreatureSpecies, Phaser.GameObjects.Text>();
   private territoryMapMode = false;
   private cellSize = 12;
   private mapOffsetX = 0;
@@ -749,6 +750,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.territoryMapMode) {
       this.drawTerritoryMapOverlay();
     } else {
+      this.hideTerritoryLabels();
       this.drawPredatorTerritories();
     }
     this.drawCorpses();
@@ -841,23 +843,25 @@ export class WorldScene extends Phaser.Scene {
   private drawPredatorTerritory(territory: CreatureTerritory): void {
     const center = this.gridToWorldCenter(territory);
     const radius = territory.radius * this.cellSize;
-    const zocRadius = territory.zocRadius * this.cellSize;
     const visualStyle = speciesVisual[territory.species] ?? speciesVisual.wolf;
     const alpha = Phaser.Math.Clamp(0.025 + territory.strength * 0.055 + territory.pressure * 0.016, 0.035, 0.13);
     const pulse = 0.5 + Math.sin(this.time.now * 0.003 + territory.packId) * 0.5;
+    const zocOutline = this.createTerritoryOutline(territory, territory.zocRadius);
+    const coreOutline = this.createTerritoryOutline(territory, territory.radius);
 
     this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.08), visualStyle.color, alpha * 0.34);
-    this.overlayGraphics.strokeCircle(center.x, center.y, zocRadius);
+    this.overlayGraphics.strokePoints(zocOutline, true, true);
     this.overlayGraphics.fillStyle(visualStyle.color, alpha * 0.16);
-    this.overlayGraphics.fillCircle(center.x, center.y, radius);
+    this.overlayGraphics.fillPoints(coreOutline, true, true);
     this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.16), visualStyle.color, alpha);
-    this.overlayGraphics.strokeCircle(center.x, center.y, radius);
+    this.overlayGraphics.strokePoints(coreOutline, true, true);
     this.overlayGraphics.fillStyle(visualStyle.color, alpha * 1.7);
     this.overlayGraphics.fillCircle(center.x, center.y, Math.max(2, this.cellSize * 0.38));
 
     if (territory.pressure > 0.42) {
+      const pressureOutline = this.createTerritoryOutline(territory, territory.radius * (0.9 + pulse * 0.04), 0.92);
       this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.12), 0xff705c, alpha * (0.55 + pulse * 0.55));
-      this.overlayGraphics.strokeCircle(center.x, center.y, radius * (0.9 + pulse * 0.04));
+      this.overlayGraphics.strokePoints(pressureOutline, true, true);
     }
   }
 
@@ -867,33 +871,40 @@ export class WorldScene extends Phaser.Scene {
     this.overlayGraphics.fillStyle(0x06100d, 0.54);
     this.overlayGraphics.fillRect(this.mapOffsetX, this.mapOffsetY, mapWidth, mapHeight);
 
+    const visibleLabels = new Set<CreatureSpecies>();
     for (const territory of this.creatures.getPredatorTerritories()) {
       const center = this.gridToWorldCenter(territory);
       const radius = territory.radius * this.cellSize;
-      const zocRadius = territory.zocRadius * this.cellSize;
       const visualStyle = speciesVisual[territory.species] ?? speciesVisual.wolf;
       const conflict = Phaser.Math.Clamp(territory.pressure / 2.4, 0, 1);
       const alpha = Phaser.Math.Clamp(0.12 + territory.strength * 0.14, 0.12, 0.28);
       const pulse = 0.5 + Math.sin(this.time.now * 0.004 + territory.packId) * 0.5;
+      const zocOutline = this.createTerritoryOutline(territory, territory.zocRadius);
+      const coreOutline = this.createTerritoryOutline(territory, territory.radius);
 
       this.overlayGraphics.fillStyle(visualStyle.color, alpha * 0.18);
-      this.overlayGraphics.fillCircle(center.x, center.y, zocRadius);
+      this.overlayGraphics.fillPoints(zocOutline, true, true);
       this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.18), 0xf4ecd5, 0.2);
-      this.overlayGraphics.strokeCircle(center.x, center.y, zocRadius);
+      this.overlayGraphics.strokePoints(zocOutline, true, true);
       this.overlayGraphics.fillStyle(visualStyle.color, alpha);
-      this.overlayGraphics.fillCircle(center.x, center.y, radius);
+      this.overlayGraphics.fillPoints(coreOutline, true, true);
       this.overlayGraphics.lineStyle(Math.max(2, this.cellSize * 0.32), visualStyle.color, 0.72);
-      this.overlayGraphics.strokeCircle(center.x, center.y, radius);
+      this.overlayGraphics.strokePoints(coreOutline, true, true);
       this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.16), 0xf6efd8, 0.26);
-      this.overlayGraphics.strokeCircle(center.x, center.y, radius * 0.55);
+      this.overlayGraphics.strokePoints(this.createTerritoryOutline(territory, territory.radius * 0.56, 0.74), true, true);
       this.overlayGraphics.fillStyle(visualStyle.color, 0.95);
       this.overlayGraphics.fillCircle(center.x, center.y, Math.max(4, this.cellSize * 0.7));
 
       if (conflict > 0.05) {
+        const conflictOutline = this.createTerritoryOutline(territory, territory.radius * (0.92 + pulse * 0.05), 0.9);
         this.overlayGraphics.lineStyle(Math.max(1.5, this.cellSize * 0.22), 0xff624f, 0.35 + conflict * 0.5 * (0.75 + pulse * 0.25));
-        this.overlayGraphics.strokeCircle(center.x, center.y, radius * (0.92 + pulse * 0.05));
+        this.overlayGraphics.strokePoints(conflictOutline, true, true);
       }
+
+      visibleLabels.add(territory.species);
+      this.updateTerritoryLabel(territory, center, radius);
     }
+    this.hideTerritoryLabels(visibleLabels);
 
     this.drawTerritoryMapPredatorMarkers();
   }
@@ -912,6 +923,81 @@ export class WorldScene extends Phaser.Scene {
       this.overlayGraphics.fillCircle(center.x, center.y, radius);
       this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.12), 0xf7f1d6, 0.58);
       this.overlayGraphics.strokeCircle(center.x, center.y, radius * 1.35);
+    }
+  }
+
+  private createTerritoryOutline(territory: CreatureTerritory, radiusInCells: number, roughness = 1): Phaser.Geom.Point[] {
+    const center = this.gridToWorldCenter(territory);
+    const points: Phaser.Geom.Point[] = [];
+    const pointCount = 36;
+    for (let i = 0; i < pointCount; i += 1) {
+      const angle = (Math.PI * 2 * i) / pointCount;
+      const factor = this.territoryShapeFactor(territory, angle, roughness);
+      const radius = radiusInCells * this.cellSize * factor;
+      points.push(new Phaser.Geom.Point(center.x + Math.cos(angle) * radius, center.y + Math.sin(angle) * radius));
+    }
+    return points;
+  }
+
+  private territoryShapeFactor(territory: CreatureTerritory, angle: number, roughness: number): number {
+    const seed = this.territoryShapeSeed(territory.species) + territory.packId * 0.173;
+    const wave =
+      Math.sin(angle * 3 + seed) * 0.14 +
+      Math.cos(angle * 5 - seed * 0.7) * 0.09 +
+      Math.sin(angle * 2 + seed * 1.9) * 0.07;
+    return Phaser.Math.Clamp(1 + wave * roughness, 0.76, 1.24);
+  }
+
+  private territoryShapeSeed(species: CreatureSpecies): number {
+    switch (species) {
+      case 'wolf':
+        return 1.2;
+      case 'fox':
+        return 3.7;
+      case 'bear':
+        return 5.3;
+      case 'vulture':
+        return 6.9;
+      case 'boar':
+        return 8.1;
+      case 'deer':
+        return 9.4;
+      case 'hare':
+      default:
+        return 10.8;
+    }
+  }
+
+  private updateTerritoryLabel(territory: CreatureTerritory, center: GridPosition, radius: number): void {
+    let label = this.territoryLabels.get(territory.species);
+    if (!label) {
+      label = this.add.text(0, 0, '', {
+        align: 'center',
+        color: '#f8f1dc',
+        fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+        fontStyle: '700',
+      });
+      label.setOrigin(0.5);
+      label.setDepth(8);
+      label.setVisible(false);
+      this.territoryLabels.set(territory.species, label);
+    }
+
+    const fontSize = Math.round(Phaser.Math.Clamp(this.cellSize * 2.65, 12, 18));
+    label.setText(speciesLabel[territory.species]);
+    label.setFontSize(fontSize);
+    label.setStroke('#06100d', Math.max(3, Math.round(fontSize * 0.22)));
+    label.setBackgroundColor('rgba(6, 16, 13, 0.56)');
+    label.setPadding(Math.max(5, Math.round(fontSize * 0.34)), 3, Math.max(5, Math.round(fontSize * 0.34)), 3);
+    label.setPosition(center.x, center.y - radius * 0.08);
+    label.setVisible(true);
+  }
+
+  private hideTerritoryLabels(visibleSpecies = new Set<CreatureSpecies>()): void {
+    for (const [species, label] of this.territoryLabels) {
+      if (!visibleSpecies.has(species)) {
+        label.setVisible(false);
+      }
     }
   }
 
