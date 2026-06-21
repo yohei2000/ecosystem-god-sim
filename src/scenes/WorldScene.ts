@@ -13,6 +13,8 @@ const GRID_WIDTH = 122;
 const GRID_HEIGHT = 56;
 const CREATURE_FRAME_SIZE = 192;
 const CREATURE_MOTION_FRAMES = 4;
+const CREATURE_WALK_FRAME_SEQUENCE = [0, 1, 2, 3, 2, 1] as const;
+const CREATURE_IDLE_GAIT_SCALE = 0.42;
 const EFFECT_FRAME_SIZE = 256;
 const CELL_OVERLAY_REFRESH_SECONDS = 5.0;
 const TERRITORY_OVERLAY_REFRESH_SECONDS = 0.16;
@@ -1103,9 +1105,9 @@ export class WorldScene extends Phaser.Scene {
       const spriteSize = Math.max(22, this.cellSize * visualStyle.size);
       const gaitSpeed = visualStyle.gait;
       const isMoving = distance > this.cellSize * 0.08 || frameMove > 0.12;
-      const motionFrame = isMoving
-        ? Math.floor((this.time.now * 0.001 * gaitSpeed + visual.animationSeed) % CREATURE_MOTION_FRAMES)
-        : 0;
+      const vitalityScale = Phaser.Math.Clamp(0.72 + creature.energy * 0.28 - creature.sickness * 0.18, 0.42, 1.04);
+      const animationRate = gaitSpeed * vitalityScale * (isMoving ? 1 : CREATURE_IDLE_GAIT_SCALE);
+      const motionFrame = this.creatureMotionFrame(animationRate, visual.animationSeed);
       const frameOffset = visualStyle.frameOffset;
       const renderX = visual.x;
       const renderY = visual.y;
@@ -1172,6 +1174,11 @@ export class WorldScene extends Phaser.Scene {
         this.creatureVisuals.delete(id);
       }
     }
+  }
+
+  private creatureMotionFrame(animationRate: number, animationSeed: number): number {
+    const frameIndex = Math.floor((this.time.now * 0.001 * animationRate + animationSeed) % CREATURE_WALK_FRAME_SEQUENCE.length);
+    return CREATURE_WALK_FRAME_SEQUENCE[frameIndex] % CREATURE_MOTION_FRAMES;
   }
 
   private getCreatureEffectSprite(
