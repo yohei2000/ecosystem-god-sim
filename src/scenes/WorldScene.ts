@@ -3,6 +3,7 @@ import type { Cell, CreatureEvent, CreatureSpecies, CreatureTerritory, GodPower,
 import terrainAtlasUrl from '../assets/terrain-atlas.png';
 import terrainStampsUrl from '../assets/terrain-stamps.png';
 import creatureAtlasUrl from '../assets/creature-atlas.png';
+import effectAtlasUrl from '../assets/effect-atlas.png';
 import { CreatureSystem } from '../systems/CreatureSystem';
 import { EnvironmentSystem } from '../systems/EnvironmentSystem';
 import { GodPowerSystem } from '../systems/GodPowerSystem';
@@ -16,6 +17,7 @@ const TERRAIN_STAMP_FRAME_SIZE = 512;
 const TERRAIN_TEXTURE_CELL_SIZE = 9;
 const CREATURE_FRAME_SIZE = 192;
 const CREATURE_MOTION_FRAMES = 4;
+const EFFECT_FRAME_SIZE = 256;
 const TERRAIN_BASE_REFRESH_SECONDS = 6.0;
 const CELL_OVERLAY_REFRESH_SECONDS = 5.0;
 const TERRITORY_OVERLAY_REFRESH_SECONDS = 1.5;
@@ -108,6 +110,18 @@ const speciesVisual: Record<CreatureSpecies, { frameOffset: number; size: number
   panther: { frameOffset: 32, size: 4.9, gait: 9.6, color: 0x20252c },
 };
 
+const effectFrame = {
+  meteor: 0,
+  impact: 1,
+  rain: 2,
+  sun: 3,
+  seed: 4,
+  corpse: 5,
+  sickness: 6,
+  alert: 7,
+  ash: 8,
+} as const;
+
 export class WorldScene extends Phaser.Scene {
   private environment!: EnvironmentSystem;
   private plants!: PlantSystem;
@@ -132,6 +146,7 @@ export class WorldScene extends Phaser.Scene {
   private readonly creatureSprites = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureSicknessGlows = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureAlertRings = new Map<number, Phaser.GameObjects.Image>();
+  private readonly corpseSprites = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureVisuals = new Map<number, CreatureVisual>();
   private readonly territoryLabels = new Map<CreatureSpecies, Phaser.GameObjects.Text>();
   private readonly territoryOutlineCache = new Map<string, Phaser.Geom.Point[]>();
@@ -175,6 +190,10 @@ export class WorldScene extends Phaser.Scene {
       frameWidth: CREATURE_FRAME_SIZE,
       frameHeight: CREATURE_FRAME_SIZE,
     });
+    this.load.spritesheet('effects', effectAtlasUrl, {
+      frameWidth: EFFECT_FRAME_SIZE,
+      frameHeight: EFFECT_FRAME_SIZE,
+    });
   }
 
   create(): void {
@@ -204,7 +223,6 @@ export class WorldScene extends Phaser.Scene {
     this.actorGraphics.setDepth(3);
     this.createTerrainBaseTexture();
     this.createMirroredCreatureTexture();
-    this.createActorEffectTextures();
     this.createTerrainStamps();
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -390,28 +408,6 @@ export class WorldScene extends Phaser.Scene {
       frameWidth: CREATURE_FRAME_SIZE,
       frameHeight: CREATURE_FRAME_SIZE,
     });
-  }
-
-  private createActorEffectTextures(): void {
-    const size = 96;
-    const graphics = this.add.graphics();
-    graphics.setVisible(false);
-
-    if (!this.textures.exists('creature-sick-glow')) {
-      graphics.clear();
-      graphics.fillStyle(0xa8e06f, 0.24);
-      graphics.fillCircle(size / 2, size / 2, size * 0.35);
-      graphics.generateTexture('creature-sick-glow', size, size);
-    }
-
-    if (!this.textures.exists('creature-alert-ring')) {
-      graphics.clear();
-      graphics.lineStyle(4, 0xfff3a0, 0.66);
-      graphics.strokeCircle(size / 2, size / 2, size * 0.34);
-      graphics.generateTexture('creature-alert-ring', size, size);
-    }
-
-    graphics.destroy();
   }
 
   private syncTerrainStamps(): void {
@@ -612,16 +608,10 @@ export class WorldScene extends Phaser.Scene {
     const target = this.gridToWorldCenter(grid);
     const startX = Phaser.Math.Clamp(target.x - this.scale.width * 0.34, 24, this.scale.width - 24);
     const startY = Math.max(16, this.mapOffsetY - 92);
-    const fireball = this.createEffectGraphic(startX, startY, 6);
-
-    fireball.lineStyle(Math.max(4, this.cellSize * 0.42), 0xffb347, 0.7);
-    fireball.lineBetween(-this.cellSize * 5, -this.cellSize * 3.4, 0, 0);
-    fireball.lineStyle(Math.max(2, this.cellSize * 0.22), 0xfff0a3, 0.95);
-    fireball.lineBetween(-this.cellSize * 3.2, -this.cellSize * 2.1, 0, 0);
-    fireball.fillStyle(0xfff1a8, 1);
-    fireball.fillCircle(0, 0, Math.max(5, this.cellSize * 0.8));
-    fireball.fillStyle(0xff6b35, 0.88);
-    fireball.fillCircle(0, 0, Math.max(8, this.cellSize * 1.15));
+    const fireball = this.add.image(startX, startY, 'effects', effectFrame.meteor);
+    fireball.setDepth(6);
+    fireball.setAngle(-28);
+    fireball.setDisplaySize(this.cellSize * 9.5, this.cellSize * 9.5);
 
     this.tweens.add({
       targets: fireball,
@@ -640,6 +630,18 @@ export class WorldScene extends Phaser.Scene {
   private playRainEffect(grid: GridPosition): void {
     const center = this.gridToWorldCenter(grid);
     const radius = this.cellSize * 6;
+    const rain = this.add.image(center.x, center.y - radius * 0.12, 'effects', effectFrame.rain);
+    rain.setDepth(5.2);
+    rain.setDisplaySize(radius * 2.45, radius * 1.85);
+    rain.setAlpha(0.88);
+    this.tweens.add({
+      targets: rain,
+      y: rain.y + this.cellSize * 0.8,
+      alpha: 0,
+      duration: 980,
+      ease: 'Sine.easeOut',
+      onComplete: () => rain.destroy(),
+    });
     this.addRing(center.x, center.y, radius * 0.35, 0x7dccff, 2, 680, 0, 2.1);
     this.addRing(center.x, center.y, radius * 0.72, 0x7dccff, 2, 820, 80, 1.45);
 
@@ -663,6 +665,19 @@ export class WorldScene extends Phaser.Scene {
   private playSunEffect(grid: GridPosition): void {
     const center = this.gridToWorldCenter(grid);
     const radius = this.cellSize * 5.6;
+    const sun = this.add.image(center.x, center.y, 'effects', effectFrame.sun);
+    sun.setDepth(5.1);
+    sun.setDisplaySize(radius * 1.95, radius * 1.95);
+    sun.setAlpha(0.88);
+    this.tweens.add({
+      targets: sun,
+      angle: 16,
+      scale: 1.16,
+      alpha: 0,
+      duration: 920,
+      ease: 'Cubic.easeOut',
+      onComplete: () => sun.destroy(),
+    });
     const rays = this.createEffectGraphic(center.x, center.y, 5);
     rays.lineStyle(2, 0xffd36a, 0.8);
     for (let i = 0; i < 18; i += 1) {
@@ -691,6 +706,18 @@ export class WorldScene extends Phaser.Scene {
   private playSeedEffect(grid: GridPosition): void {
     const center = this.gridToWorldCenter(grid);
     const radius = this.cellSize * 4.8;
+    const seed = this.add.image(center.x, center.y, 'effects', effectFrame.seed);
+    seed.setDepth(5.15);
+    seed.setDisplaySize(radius * 1.85, radius * 1.85);
+    seed.setAlpha(0.9);
+    this.tweens.add({
+      targets: seed,
+      scale: 1.12,
+      alpha: 0,
+      duration: 940,
+      ease: 'Cubic.easeOut',
+      onComplete: () => seed.destroy(),
+    });
     this.addRing(center.x, center.y, this.cellSize * 1.2, 0xb7f26a, 2, 620, 0, 3);
     this.addRing(center.x, center.y, this.cellSize * 2.2, 0x68d466, 2, 760, 90, 2.4);
     this.burstParticles(center.x, center.y, 34, [0xd8ff80, 0x7de36a, 0x3ca65a], this.cellSize * 0.8, radius, 980);
@@ -725,6 +752,18 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private playImpactExplosion(x: number, y: number, radius: number): void {
+    const impact = this.add.image(x, y, 'effects', effectFrame.impact);
+    impact.setDepth(7.1);
+    impact.setDisplaySize(radius * 2.35, radius * 2.35);
+    impact.setAlpha(0.96);
+    this.tweens.add({
+      targets: impact,
+      scale: 1.42,
+      alpha: 0,
+      duration: 620,
+      ease: 'Cubic.easeOut',
+      onComplete: () => impact.destroy(),
+    });
     const flash = this.createEffectGraphic(x, y, 7);
     flash.fillStyle(0xfff3b0, 0.95);
     flash.fillCircle(0, 0, radius * 0.44);
@@ -838,6 +877,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.territoryMapMode) {
       this.actorGraphics.setVisible(false);
       this.hideCreatureSprites();
+      this.hideCorpseSprites();
     } else {
       this.actorGraphics.setVisible(true);
       this.updateActorEffectGraphics(dt);
@@ -1207,22 +1247,22 @@ export class WorldScene extends Phaser.Scene {
 
       const showSickness = creature.sickness > 0.38;
       if (showSickness) {
-        const sicknessGlow = this.getCreatureEffectSprite(this.creatureSicknessGlows, creature.id, 'creature-sick-glow', 4.2);
+        const sicknessGlow = this.getCreatureEffectSprite(this.creatureSicknessGlows, creature.id, 'effects', effectFrame.sickness, 4.2);
         sicknessGlow.setVisible(true);
         sicknessGlow.setPosition(renderX, renderY - spriteSize * 0.18);
-        sicknessGlow.setDisplaySize(spriteSize * 0.6, spriteSize * 0.6);
-        sicknessGlow.setAlpha(Phaser.Math.Clamp((creature.sickness - 0.28) * 0.9, 0.12, 0.42));
+        sicknessGlow.setDisplaySize(spriteSize * 0.52, spriteSize * 0.52);
+        sicknessGlow.setAlpha(Phaser.Math.Clamp((creature.sickness - 0.28) * 0.7, 0.1, 0.3));
       } else {
         this.creatureSicknessGlows.get(creature.id)?.setVisible(false);
       }
 
       const showAlert = creature.state === 'fleeing';
       if (showAlert) {
-        const alertRing = this.getCreatureEffectSprite(this.creatureAlertRings, creature.id, 'creature-alert-ring', 4.25);
+        const alertRing = this.getCreatureEffectSprite(this.creatureAlertRings, creature.id, 'effects', effectFrame.alert, 4.25);
         alertRing.setVisible(true);
         alertRing.setPosition(renderX, renderY);
-        alertRing.setDisplaySize(spriteSize * 1.08, spriteSize * 1.08);
-        alertRing.setAlpha(0.48);
+        alertRing.setDisplaySize(spriteSize * 0.62, spriteSize * 0.62);
+        alertRing.setAlpha(0.24);
       } else {
         this.creatureAlertRings.get(creature.id)?.setVisible(false);
       }
@@ -1273,13 +1313,16 @@ export class WorldScene extends Phaser.Scene {
     store: Map<number, Phaser.GameObjects.Image>,
     id: number,
     textureKey: string,
+    frame: number,
     depth: number,
   ): Phaser.GameObjects.Image {
     let sprite = store.get(id);
     if (!sprite) {
-      sprite = this.add.image(0, 0, textureKey);
+      sprite = this.add.image(0, 0, textureKey, frame);
       sprite.setDepth(depth);
       store.set(id, sprite);
+    } else if (sprite.frame.name !== String(frame)) {
+      sprite.setFrame(frame);
     }
     return sprite;
   }
@@ -1309,17 +1352,40 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private drawCorpses(): void {
-    const radius = Math.max(2, this.cellSize * 0.24);
+    const aliveIds = new Set<number>();
     for (const corpse of this.creatures.corpses) {
       const cx = this.mapOffsetX + corpse.x * this.cellSize + this.cellSize / 2;
       const cy = this.mapOffsetY + corpse.y * this.cellSize + this.cellSize / 2;
       const ageAlpha = Phaser.Math.Clamp(0.2 + corpse.nutrientsLeft * 0.8, 0.16, 0.9);
-      this.actorGraphics.fillStyle(0xead7be, ageAlpha);
-      this.actorGraphics.fillEllipse(cx, cy, radius * 2.1, radius * 1.1);
-      if (corpse.decay > 5) {
-        this.actorGraphics.fillStyle(0x9bd36a, 0.18);
-        this.actorGraphics.fillCircle(cx, cy, radius * 1.8);
+      let sprite = this.corpseSprites.get(corpse.id);
+      if (!sprite) {
+        sprite = this.add.image(cx, cy, 'effects', effectFrame.corpse);
+        sprite.setDepth(3.45);
+        this.corpseSprites.set(corpse.id, sprite);
       }
+      sprite.setVisible(true);
+      sprite.setPosition(cx, cy);
+      sprite.setDisplaySize(this.cellSize * 4.2, this.cellSize * 3.2);
+      sprite.setAlpha(ageAlpha);
+      if (corpse.decay > 5) {
+        sprite.setTint(0xb8d98b);
+      } else {
+        sprite.clearTint();
+      }
+      aliveIds.add(corpse.id);
+    }
+
+    for (const [id, sprite] of this.corpseSprites) {
+      if (!aliveIds.has(id)) {
+        sprite.destroy();
+        this.corpseSprites.delete(id);
+      }
+    }
+  }
+
+  private hideCorpseSprites(): void {
+    for (const sprite of this.corpseSprites.values()) {
+      sprite.setVisible(false);
     }
   }
 }
