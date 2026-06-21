@@ -27,10 +27,12 @@ export class UISystem {
   private readonly weatherMetric = this.requireElement('weatherMetric');
   private readonly riskMetric = this.requireElement('riskMetric');
   private readonly eventLog = this.requireElement('eventLog');
+  private readonly territoryModeButton = this.requireButton('territoryModeButton');
   private readonly buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('.power-button'));
   private readonly logs: string[] = [];
+  private territoryMode = false;
 
-  constructor(onPowerSelected: (power: GodPower) => void) {
+  constructor(onPowerSelected: (power: GodPower) => void, onTerritoryModeChanged: (enabled: boolean) => void) {
     for (const button of this.buttons) {
       button.addEventListener('click', () => {
         const power = button.dataset.power as GodPower | undefined;
@@ -41,6 +43,13 @@ export class UISystem {
         onPowerSelected(power);
       });
     }
+
+    this.territoryModeButton.addEventListener('click', () => {
+      this.territoryMode = !this.territoryMode;
+      this.territoryModeButton.classList.toggle('active', this.territoryMode);
+      this.territoryModeButton.setAttribute('aria-pressed', String(this.territoryMode));
+      onTerritoryModeChanged(this.territoryMode);
+    });
   }
 
   updateStats(stats: EcosystemStats): void {
@@ -77,6 +86,14 @@ export class UISystem {
     const element = document.getElementById(id);
     if (!element) {
       throw new Error(`Missing UI element: ${id}`);
+    }
+    return element;
+  }
+
+  private requireButton(id: string): HTMLButtonElement {
+    const element = document.getElementById(id);
+    if (!(element instanceof HTMLButtonElement)) {
+      throw new Error(`Missing UI button: ${id}`);
     }
     return element;
   }

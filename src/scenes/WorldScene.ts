@@ -113,6 +113,7 @@ export class WorldScene extends Phaser.Scene {
   private readonly terrainStamps: Phaser.GameObjects.Image[] = [];
   private readonly creatureSprites = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureVisuals = new Map<number, CreatureVisual>();
+  private territoryMapMode = false;
   private cellSize = 12;
   private mapOffsetX = 0;
   private mapOffsetY = 0;
@@ -149,7 +150,14 @@ export class WorldScene extends Phaser.Scene {
     this.environment = new EnvironmentSystem(GRID_WIDTH, GRID_HEIGHT);
     this.plants = new PlantSystem(this.environment);
     this.creatures = new CreatureSystem(this.environment);
-    this.ui = new UISystem((power) => this.godPowers.setPower(power));
+    this.ui = new UISystem(
+      (power) => this.godPowers.setPower(power),
+      (enabled) => {
+        this.territoryMapMode = enabled;
+        this.ui.addLog(enabled ? '縄張り地図を表示' : '通常表示に戻す');
+        this.renderWorld(0);
+      },
+    );
     this.godPowers = new GodPowerSystem(this.environment, this.creatures, (message) => this.ui.addLog(message));
 
     this.terrainGraphics = this.add.graphics();
@@ -738,7 +746,11 @@ export class WorldScene extends Phaser.Scene {
     }
 
     this.drawAtmosphere(dt);
-    this.drawPredatorTerritories();
+    if (this.territoryMapMode) {
+      this.drawTerritoryMapOverlay();
+    } else {
+      this.drawPredatorTerritories();
+    }
     this.drawCorpses();
     this.drawCreatures(dt);
   }
@@ -843,6 +855,55 @@ export class WorldScene extends Phaser.Scene {
     if (territory.pressure > 0.42) {
       this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.12), 0xff705c, alpha * (0.55 + pulse * 0.55));
       this.overlayGraphics.strokeCircle(center.x, center.y, radius * (0.9 + pulse * 0.04));
+    }
+  }
+
+  private drawTerritoryMapOverlay(): void {
+    const mapWidth = this.cellSize * GRID_WIDTH;
+    const mapHeight = this.cellSize * GRID_HEIGHT;
+    this.overlayGraphics.fillStyle(0x06100d, 0.54);
+    this.overlayGraphics.fillRect(this.mapOffsetX, this.mapOffsetY, mapWidth, mapHeight);
+
+    for (const territory of this.creatures.getPredatorTerritories()) {
+      const center = this.gridToWorldCenter(territory);
+      const radius = territory.radius * this.cellSize;
+      const visualStyle = speciesVisual[territory.species] ?? speciesVisual.wolf;
+      const conflict = Phaser.Math.Clamp(territory.pressure / 2.4, 0, 1);
+      const alpha = Phaser.Math.Clamp(0.12 + territory.strength * 0.14, 0.12, 0.28);
+      const pulse = 0.5 + Math.sin(this.time.now * 0.004 + territory.packId) * 0.5;
+
+      this.overlayGraphics.fillStyle(visualStyle.color, alpha);
+      this.overlayGraphics.fillCircle(center.x, center.y, radius);
+      this.overlayGraphics.lineStyle(Math.max(2, this.cellSize * 0.32), visualStyle.color, 0.72);
+      this.overlayGraphics.strokeCircle(center.x, center.y, radius);
+      this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.16), 0xf6efd8, 0.26);
+      this.overlayGraphics.strokeCircle(center.x, center.y, radius * 0.55);
+      this.overlayGraphics.fillStyle(visualStyle.color, 0.95);
+      this.overlayGraphics.fillCircle(center.x, center.y, Math.max(4, this.cellSize * 0.7));
+
+      if (conflict > 0.05) {
+        this.overlayGraphics.lineStyle(Math.max(1.5, this.cellSize * 0.22), 0xff624f, 0.35 + conflict * 0.5 * (0.75 + pulse * 0.25));
+        this.overlayGraphics.strokeCircle(center.x, center.y, radius * (0.92 + pulse * 0.05));
+      }
+    }
+
+    this.drawTerritoryMapPredatorMarkers();
+  }
+
+  private drawTerritoryMapPredatorMarkers(): void {
+    for (const creature of this.creatures.creatures) {
+      if (creature.kind !== 'carnivore') {
+        continue;
+      }
+      const center = this.gridToWorldCenter(creature);
+      const visualStyle = speciesVisual[creature.species] ?? speciesVisual.wolf;
+      const radius = Math.max(2.5, this.cellSize * (creature.species === 'fox' ? 0.45 : 0.58));
+      this.overlayGraphics.fillStyle(0x070907, 0.7);
+      this.overlayGraphics.fillCircle(center.x + radius * 0.28, center.y + radius * 0.28, radius * 1.12);
+      this.overlayGraphics.fillStyle(visualStyle.color, 0.95);
+      this.overlayGraphics.fillCircle(center.x, center.y, radius);
+      this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.12), 0xf7f1d6, 0.58);
+      this.overlayGraphics.strokeCircle(center.x, center.y, radius * 1.35);
     }
   }
 
