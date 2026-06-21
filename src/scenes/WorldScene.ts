@@ -12,7 +12,7 @@ import { UISystem } from '../systems/UISystem';
 const GRID_WIDTH = 122;
 const GRID_HEIGHT = 56;
 const TERRAIN_ATLAS_FRAME_SIZE = 128;
-const TERRAIN_STAMP_FRAME_SIZE = 320;
+const TERRAIN_STAMP_FRAME_SIZE = 512;
 const TERRAIN_TEXTURE_CELL_SIZE = 12;
 const CREATURE_FRAME_SIZE = 192;
 const CREATURE_MOTION_FRAMES = 4;
@@ -84,14 +84,14 @@ const speciesLabel: Record<CreatureSpecies, string> = {
   vulture: 'ハゲワシ',
 };
 
-const speciesVisual: Record<CreatureSpecies, { frameOffset: number; size: number; gait: number; tint: number }> = {
-  hare: { frameOffset: 0, size: 3.25, gait: 12.8, tint: 0xe0b06c },
-  deer: { frameOffset: 0, size: 4.45, gait: 8.2, tint: 0xc9975b },
-  boar: { frameOffset: 0, size: 4.75, gait: 7.4, tint: 0x7a5741 },
-  wolf: { frameOffset: CREATURE_MOTION_FRAMES, size: 4.75, gait: 10.4, tint: 0x5d5e58 },
-  fox: { frameOffset: CREATURE_MOTION_FRAMES, size: 3.65, gait: 12.2, tint: 0xd87937 },
-  bear: { frameOffset: CREATURE_MOTION_FRAMES, size: 5.9, gait: 6.6, tint: 0x5b3e2f },
-  vulture: { frameOffset: CREATURE_MOTION_FRAMES, size: 3.55, gait: 9.4, tint: 0x2f2b27 },
+const speciesVisual: Record<CreatureSpecies, { frameOffset: number; size: number; gait: number; color: number }> = {
+  hare: { frameOffset: 0, size: 3.25, gait: 12.8, color: 0xe0b06c },
+  deer: { frameOffset: 4, size: 4.45, gait: 8.2, color: 0xc9975b },
+  boar: { frameOffset: 8, size: 4.75, gait: 7.4, color: 0x7a5741 },
+  wolf: { frameOffset: 12, size: 4.75, gait: 10.4, color: 0x7f8780 },
+  fox: { frameOffset: 16, size: 3.65, gait: 12.2, color: 0xd87937 },
+  bear: { frameOffset: 20, size: 5.9, gait: 6.6, color: 0x5b3e2f },
+  vulture: { frameOffset: 24, size: 3.55, gait: 9.4, color: 0x2f2b27 },
 };
 
 export class WorldScene extends Phaser.Scene {
@@ -595,7 +595,7 @@ export class WorldScene extends Phaser.Scene {
     const center = this.gridToWorldCenter(event);
     const color =
       event.species && speciesVisual[event.species]
-        ? speciesVisual[event.species].tint
+        ? speciesVisual[event.species].color
         : event.kind === 'carnivore'
           ? 0xff715c
           : 0xffef83;
@@ -901,7 +901,7 @@ export class WorldScene extends Phaser.Scene {
       } else if (creature.stress > 0.7 || creature.energy < 0.24) {
         sprite.setTint(0xffc7a9);
       } else {
-        sprite.setTint(visualStyle.tint);
+        sprite.clearTint();
       }
       aliveIds.add(creature.id);
     }
