@@ -13,9 +13,12 @@ const GRID_WIDTH = 122;
 const GRID_HEIGHT = 56;
 const TERRAIN_ATLAS_FRAME_SIZE = 128;
 const TERRAIN_STAMP_FRAME_SIZE = 512;
-const TERRAIN_TEXTURE_CELL_SIZE = 12;
+const TERRAIN_TEXTURE_CELL_SIZE = 9;
 const CREATURE_FRAME_SIZE = 192;
 const CREATURE_MOTION_FRAMES = 4;
+const TERRAIN_BASE_REFRESH_SECONDS = 1.35;
+const CELL_OVERLAY_REFRESH_SECONDS = 0.34;
+const TERRITORY_OUTLINE_POINTS = 24;
 
 interface CreatureVisual {
   x: number;
@@ -101,6 +104,7 @@ export class WorldScene extends Phaser.Scene {
   private godPowers!: GodPowerSystem;
   private ui!: UISystem;
   private terrainGraphics!: Phaser.GameObjects.Graphics;
+  private cellOverlayGraphics!: Phaser.GameObjects.Graphics;
   private actorGraphics!: Phaser.GameObjects.Graphics;
   private overlayGraphics!: Phaser.GameObjects.Graphics;
   private terrainBaseImage?: Phaser.GameObjects.Image;
@@ -110,10 +114,13 @@ export class WorldScene extends Phaser.Scene {
   private terrainScratchContext?: CanvasRenderingContext2D;
   private terrainBaseTexture?: Phaser.Textures.CanvasTexture;
   private terrainTextureTimer = 0;
+  private cellOverlayTimer = 0;
+  private cellOverlayDirty = true;
   private readonly terrainStamps: Phaser.GameObjects.Image[] = [];
   private readonly creatureSprites = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureVisuals = new Map<number, CreatureVisual>();
   private readonly territoryLabels = new Map<CreatureSpecies, Phaser.GameObjects.Text>();
+  private readonly territoryOutlineCache = new Map<string, Phaser.Geom.Point[]>();
   private territoryMapMode = false;
   private cellSize = 12;
   private mapOffsetX = 0;
@@ -162,9 +169,11 @@ export class WorldScene extends Phaser.Scene {
     this.godPowers = new GodPowerSystem(this.environment, this.creatures, (message) => this.ui.addLog(message));
 
     this.terrainGraphics = this.add.graphics();
+    this.cellOverlayGraphics = this.add.graphics();
     this.actorGraphics = this.add.graphics();
     this.overlayGraphics = this.add.graphics();
     this.terrainGraphics.setDepth(0.25);
+    this.cellOverlayGraphics.setDepth(1.7);
     this.overlayGraphics.setDepth(2);
     this.actorGraphics.setDepth(3);
     this.createTerrainBaseTexture();
@@ -213,6 +222,8 @@ export class WorldScene extends Phaser.Scene {
 
     this.mapOffsetX = (width - mapWidth) / 2;
     this.mapOffsetY = edgePadding + (availableHeight - mapHeight) / 2;
+    this.cellOverlayDirty = true;
+    this.territoryOutlineCache.clear();
     this.syncTerrainBaseTexture();
     this.syncTerrainStamps();
     this.renderWorld(0);
@@ -343,7 +354,7 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     this.terrainTextureTimer += dt;
-    if (!force && this.terrainTextureTimer < 0.55) {
+    if (!force && this.terrainTextureTimer < TERRAIN_BASE_REFRESH_SECONDS) {
       return;
     }
     this.terrainTextureTimer = 0;
@@ -735,7 +746,29 @@ export class WorldScene extends Phaser.Scene {
     this.actorGraphics.clear();
     this.overlayGraphics.clear();
     this.updateTerrainBaseTexture(dt);
+    this.updateCellOverlayGraphics(dt);
     this.drawTerrainBase();
+
+    this.drawAtmosphere(dt);
+    if (this.territoryMapMode) {
+      this.drawTerritoryMapOverlay();
+      this.hideCreatureSprites();
+    } else {
+      this.hideTerritoryLabels();
+      this.drawPredatorTerritories();
+      this.drawCorpses();
+      this.drawCreatures(dt);
+    }
+  }
+
+  private updateCellOverlayGraphics(dt: number): void {
+    this.cellOverlayTimer += dt;
+    if (!this.cellOverlayDirty && this.cellOverlayTimer < CELL_OVERLAY_REFRESH_SECONDS) {
+      return;
+    }
+    this.cellOverlayTimer = 0;
+    this.cellOverlayDirty = false;
+    this.cellOverlayGraphics.clear();
 
     for (let y = 0; y < this.environment.height; y += 1) {
       for (let x = 0; x < this.environment.width; x += 1) {
@@ -745,16 +778,6 @@ export class WorldScene extends Phaser.Scene {
         }
       }
     }
-
-    this.drawAtmosphere(dt);
-    if (this.territoryMapMode) {
-      this.drawTerritoryMapOverlay();
-    } else {
-      this.hideTerritoryLabels();
-      this.drawPredatorTerritories();
-    }
-    this.drawCorpses();
-    this.drawCreatures(dt);
   }
 
   private drawTerrainBase(): void {
@@ -773,32 +796,32 @@ export class WorldScene extends Phaser.Scene {
     const radius = Math.max(1.2, this.cellSize * 0.6);
 
     if (cell.terrain === 'crater') {
-      this.overlayGraphics.fillStyle(terrainColor.crater, 0.16 + cell.ash * 0.18);
-      this.overlayGraphics.fillCircle(cx, cy, radius * 1.12);
+      this.cellOverlayGraphics.fillStyle(terrainColor.crater, 0.16 + cell.ash * 0.18);
+      this.cellOverlayGraphics.fillCircle(cx, cy, radius * 1.12);
     }
     if (cell.terrain !== 'water' && cell.water > 0.78) {
-      this.overlayGraphics.fillStyle(0x6fc7e8, Math.min(0.13, (cell.water - 0.78) * 0.42));
-      this.overlayGraphics.fillCircle(cx, cy, radius * 0.8);
+      this.cellOverlayGraphics.fillStyle(0x6fc7e8, Math.min(0.13, (cell.water - 0.78) * 0.42));
+      this.cellOverlayGraphics.fillCircle(cx, cy, radius * 0.8);
     }
     if (cell.nutrient > 0.86 && cell.terrain !== 'water') {
-      this.overlayGraphics.fillStyle(0xe8d86a, Math.min(0.08, (cell.nutrient - 0.86) * 0.26));
-      this.overlayGraphics.fillCircle(cx, cy, radius * 0.7);
+      this.cellOverlayGraphics.fillStyle(0xe8d86a, Math.min(0.08, (cell.nutrient - 0.86) * 0.26));
+      this.cellOverlayGraphics.fillCircle(cx, cy, radius * 0.7);
     }
     if (cell.fungus > 0.38 && cell.terrain !== 'water') {
-      this.overlayGraphics.fillStyle(0x9bd36a, Math.min(0.16, cell.fungus * 0.2));
-      this.overlayGraphics.fillCircle(cx, cy, radius * 0.72);
+      this.cellOverlayGraphics.fillStyle(0x9bd36a, Math.min(0.16, cell.fungus * 0.2));
+      this.cellOverlayGraphics.fillCircle(cx, cy, radius * 0.72);
     }
     if (cell.heat > 0.55) {
-      this.overlayGraphics.fillStyle(0xff6b35, Math.min(0.3, cell.heat * 0.3));
-      this.overlayGraphics.fillCircle(cx, cy, radius * 0.95);
+      this.cellOverlayGraphics.fillStyle(0xff6b35, Math.min(0.3, cell.heat * 0.3));
+      this.cellOverlayGraphics.fillCircle(cx, cy, radius * 0.95);
     }
     if (cell.ash > 0.32) {
-      this.overlayGraphics.fillStyle(0xc9c0b1, Math.min(0.22, cell.ash * 0.22));
-      this.overlayGraphics.fillCircle(cx, cy, radius);
+      this.cellOverlayGraphics.fillStyle(0xc9c0b1, Math.min(0.22, cell.ash * 0.22));
+      this.cellOverlayGraphics.fillCircle(cx, cy, radius);
     }
     if (cell.toxicity > 0.34) {
-      this.overlayGraphics.fillStyle(0x6f5aa8, Math.min(0.18, cell.toxicity * 0.22));
-      this.overlayGraphics.fillCircle(cx, cy, radius * 0.82);
+      this.cellOverlayGraphics.fillStyle(0x6f5aa8, Math.min(0.18, cell.toxicity * 0.22));
+      this.cellOverlayGraphics.fillCircle(cx, cy, radius * 0.82);
     }
   }
 
@@ -928,13 +951,19 @@ export class WorldScene extends Phaser.Scene {
 
   private createTerritoryOutline(territory: CreatureTerritory, radiusInCells: number, roughness = 1): Phaser.Geom.Point[] {
     const center = this.gridToWorldCenter(territory);
-    const points: Phaser.Geom.Point[] = [];
-    const pointCount = 36;
-    for (let i = 0; i < pointCount; i += 1) {
-      const angle = (Math.PI * 2 * i) / pointCount;
+    const cacheKey = `${territory.species}:${territory.packId}:${radiusInCells.toFixed(2)}:${roughness.toFixed(2)}:${this.cellSize.toFixed(3)}`;
+    let points = this.territoryOutlineCache.get(cacheKey);
+    if (!points) {
+      points = Array.from({ length: TERRITORY_OUTLINE_POINTS }, () => new Phaser.Geom.Point());
+      this.territoryOutlineCache.set(cacheKey, points);
+    }
+
+    for (let i = 0; i < TERRITORY_OUTLINE_POINTS; i += 1) {
+      const angle = (Math.PI * 2 * i) / TERRITORY_OUTLINE_POINTS;
       const factor = this.territoryShapeFactor(territory, angle, roughness);
       const radius = radiusInCells * this.cellSize * factor;
-      points.push(new Phaser.Geom.Point(center.x + Math.cos(angle) * radius, center.y + Math.sin(angle) * radius));
+      points[i].x = center.x + Math.cos(angle) * radius;
+      points[i].y = center.y + Math.sin(angle) * radius;
     }
     return points;
   }
@@ -1067,6 +1096,7 @@ export class WorldScene extends Phaser.Scene {
         this.creatureSprites.set(creature.id, sprite);
       }
 
+      sprite.setVisible(true);
       const textureKey = visual.facingLeft ? 'creatures-left' : 'creatures';
       if (sprite.texture.key !== textureKey) {
         sprite.setTexture(textureKey, frameOffset + motionFrame);
@@ -1095,6 +1125,13 @@ export class WorldScene extends Phaser.Scene {
         this.creatureVisuals.delete(id);
       }
     }
+  }
+
+  private hideCreatureSprites(): void {
+    for (const sprite of this.creatureSprites.values()) {
+      sprite.setVisible(false);
+    }
+    this.actorGraphics.clear();
   }
 
   private drawCorpses(): void {
