@@ -181,7 +181,6 @@ export class WorldScene extends Phaser.Scene {
     this.territoryGraphics.setDepth(2.4);
     this.actorGraphics.setDepth(3);
     this.createTerrainBaseTexture();
-    this.createMirroredCreatureTexture();
     this.createCreatureAnimations();
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -276,79 +275,24 @@ export class WorldScene extends Phaser.Scene {
     this.terrainBaseImage.setDisplaySize(this.cellSize * GRID_WIDTH, this.cellSize * GRID_HEIGHT);
   }
 
-  private createMirroredCreatureTexture(): void {
-    if (this.textures.exists('creatures-left')) {
-      return;
-    }
-
-    const source = this.textures.get('creatures').getSourceImage() as CanvasImageSource & {
-      width: number;
-      height: number;
-    };
-    const canvas = document.createElement('canvas');
-    canvas.width = source.width;
-    canvas.height = source.height;
-
-    const context = canvas.getContext('2d');
-    if (!context) {
-      return;
-    }
-
-    const columns = Math.floor(source.width / CREATURE_FRAME_SIZE);
-    const rows = Math.floor(source.height / CREATURE_FRAME_SIZE);
-    for (let row = 0; row < rows; row += 1) {
-      for (let column = 0; column < columns; column += 1) {
-        const frameX = column * CREATURE_FRAME_SIZE;
-        const frameY = row * CREATURE_FRAME_SIZE;
-        context.save();
-        context.translate(frameX + CREATURE_FRAME_SIZE, frameY);
-        context.scale(-1, 1);
-        context.drawImage(
-          source,
-          frameX,
-          frameY,
-          CREATURE_FRAME_SIZE,
-          CREATURE_FRAME_SIZE,
-          0,
-          0,
-          CREATURE_FRAME_SIZE,
-          CREATURE_FRAME_SIZE,
-        );
-        context.restore();
-      }
-    }
-
-    const mirroredTexture = this.textures.addCanvas('creatures-left-source', canvas);
-    if (!mirroredTexture) {
-      return;
-    }
-
-    this.textures.addSpriteSheet('creatures-left', mirroredTexture, {
-      frameWidth: CREATURE_FRAME_SIZE,
-      frameHeight: CREATURE_FRAME_SIZE,
-    });
-  }
-
   private createCreatureAnimations(): void {
     const speciesList = Object.keys(speciesVisual) as CreatureSpecies[];
     for (const species of speciesList) {
-      this.createCreatureWalkAnimation(species, false);
-      this.createCreatureWalkAnimation(species, true);
+      this.createCreatureWalkAnimation(species);
     }
   }
 
-  private createCreatureWalkAnimation(species: CreatureSpecies, facingLeft: boolean): void {
-    const key = this.creatureWalkAnimationKey(species, facingLeft);
+  private createCreatureWalkAnimation(species: CreatureSpecies): void {
+    const key = this.creatureWalkAnimationKey(species);
     if (this.anims.exists(key)) {
       return;
     }
 
     const visualStyle = speciesVisual[species];
-    const textureKey = facingLeft ? 'creatures-left' : 'creatures';
     this.anims.create({
       key,
       frames: CREATURE_WALK_FRAME_SEQUENCE.map((frame) => ({
-        key: textureKey,
+        key: 'creatures',
         frame: visualStyle.frameOffset + (frame % CREATURE_MOTION_FRAMES),
       })),
       frameRate: Math.max(5, visualStyle.gait),
@@ -356,8 +300,8 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
-  private creatureWalkAnimationKey(species: CreatureSpecies, facingLeft: boolean): string {
-    return `creature-walk-${species}-${facingLeft ? 'left' : 'right'}`;
+  private creatureWalkAnimationKey(species: CreatureSpecies): string {
+    return `creature-walk-${species}`;
   }
 
   private pointerToGrid(pointerX: number, pointerY: number): GridPosition | undefined {
@@ -1174,10 +1118,10 @@ export class WorldScene extends Phaser.Scene {
       }
 
       sprite.setVisible(true);
-      this.playCreatureWalkAnimation(sprite, creature.species, visual.facingLeft, animationTimeScale);
+      this.playCreatureWalkAnimation(sprite, creature.species, animationTimeScale);
       sprite.setPosition(renderX, renderY);
       sprite.setDisplaySize(spriteSize, spriteSize);
-      sprite.setFlipX(false);
+      sprite.setFlipX(visual.facingLeft);
       sprite.setRotation(0);
       sprite.setAlpha(Phaser.Math.Clamp(0.62 + creature.energy * 0.3 - creature.sickness * 0.14, 0.48, 1));
       if (creature.sickness > 0.48) {
@@ -1204,10 +1148,9 @@ export class WorldScene extends Phaser.Scene {
   private playCreatureWalkAnimation(
     sprite: Phaser.GameObjects.Sprite,
     species: CreatureSpecies,
-    facingLeft: boolean,
     timeScale: number,
   ): void {
-    const animationKey = this.creatureWalkAnimationKey(species, facingLeft);
+    const animationKey = this.creatureWalkAnimationKey(species);
     if (sprite.anims.currentAnim?.key !== animationKey || !sprite.anims.isPlaying) {
       sprite.play({ key: animationKey, randomFrame: true }, true);
     }
