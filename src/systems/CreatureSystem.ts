@@ -15,6 +15,8 @@ import { EnvironmentSystem } from './EnvironmentSystem';
 const MAX_CREATURES = 420;
 const SPECIES_COUNT = 9;
 const TERRITORY_ZOC_BUFFER = 3.5;
+const TERRITORY_CONTEST_GAP = 1.8;
+const TERRITORY_CONTEST_BAND = TERRITORY_ZOC_BUFFER * 2.2;
 const CREATURE_UPDATE_FRACTION = 0.1;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
@@ -474,7 +476,7 @@ export class CreatureSystem {
     const distanceFromHome = Math.hypot(creature.x - territory.x, creature.y - territory.y);
     const outside = Math.max(0, distanceFromHome - territory.radius);
     const rivalPressure = this.rivalTerritoryPressureAt(creature, creature.species);
-    creature.stress = clamp01(creature.stress + (outside * 0.012 + rivalPressure * 0.035) * dt);
+    creature.stress = clamp01(creature.stress + (outside * 0.012 + rivalPressure * 0.052) * dt);
     if (outside > territory.radius * 0.35) {
       creature.energy = clamp(creature.energy - outside * 0.0018 * dt, 0, profile.maxEnergy);
     }
@@ -530,7 +532,7 @@ export class CreatureSystem {
 
   private updateHunter(creature: Creature): void {
     const territory = this.territories.get(creature.species);
-    if (territory && this.distanceFromTerritory(creature, territory) > territory.radius * 1.18 && creature.energy > 0.36) {
+    if (territory && this.distanceFromTerritory(creature, territory) > territory.radius * 1.36 && creature.energy > 0.36) {
       creature.state = 'hunting';
       this.stepToward(creature, territory);
       return;
@@ -538,14 +540,14 @@ export class CreatureSystem {
 
     const corpse =
       creature.energy < 0.78
-        ? this.findNearestCorpse(creature, creature.species === 'fox' ? 7 : 8, territory, creature.energy < 0.42 ? 1.28 : 1.06)
+        ? this.findNearestCorpse(creature, creature.species === 'fox' ? 7 : 8, territory, creature.energy < 0.42 ? 1.42 : 1.18)
         : undefined;
     if (corpse) {
       this.seekAndEatCorpse(creature, corpse, creature.species === 'fox' ? 0.75 : 1);
       return;
     }
 
-    const prey = this.findBestPrey(creature, creature.species === 'fox' ? 11 : 15, territory);
+    const prey = this.findBestPrey(creature, creature.species === 'fox' ? 12 : 17, territory);
     if (prey) {
       this.seekAndHunt(creature, prey, creature.species === 'fox' ? 0.72 : 1);
       return;
@@ -911,13 +913,13 @@ export class CreatureSystem {
         continue;
       }
       const territoryDistance = territory ? this.distanceFromTerritory(prey, territory) : 0;
-      if (territory && territoryDistance > territory.radius * (origin.energy < 0.44 ? 1.34 : 1.08)) {
+      if (territory && territoryDistance > territory.radius * (origin.energy < 0.44 ? 1.5 : 1.24)) {
         continue;
       }
       const herdDensity = this.herdDensityAt(prey, prey.packId, speciesProfiles[prey.species].groupRadius);
       const preyValue = speciesProfiles[prey.species].corpseNutrients;
       const homeBonus = territory ? clamp01(1 - territoryDistance / Math.max(1, territory.radius)) * 0.62 : 0;
-      const rivalPenalty = this.rivalTerritoryPressureAt(prey, origin.species) * 0.7;
+      const rivalPenalty = this.rivalTerritoryPressureAt(prey, origin.species) * 0.34;
       const score =
         preyValue +
         (1.2 - prey.energy) * 1.2 +
@@ -1115,9 +1117,18 @@ export class CreatureSystem {
         continue;
       }
       const distance = this.distanceFromTerritory(creature, territory);
-      if (distance <= territory.zocRadius) {
-        const speciesWeight = creature.species === territory.species ? 1.18 : 0.82;
-        pressure += (1 - distance / Math.max(1, territory.zocRadius)) * speciesWeight;
+      if (distance <= territory.zocRadius + TERRITORY_CONTEST_GAP) {
+        pressure += clamp01(1 - distance / Math.max(1, territory.zocRadius + TERRITORY_CONTEST_GAP)) * 1.18;
+      }
+    }
+    for (const rival of this.territories.values()) {
+      const profile = speciesProfiles[rival.species];
+      if (rival.species === ownSpecies || profile.kind !== 'carnivore') {
+        continue;
+      }
+      const edgeGap = this.distanceFromTerritory(rival, territory) - (territory.radius + rival.radius);
+      if (edgeGap <= TERRITORY_CONTEST_BAND) {
+        pressure += clamp01(1 - Math.max(0, edgeGap) / TERRITORY_CONTEST_BAND) * rival.strength * 0.95;
       }
     }
     return pressure;
@@ -1133,28 +1144,30 @@ export class CreatureSystem {
       if (distance <= territory.zocRadius) {
         const insideCore = distance <= territory.radius;
         const falloff = 1 - distance / Math.max(1, territory.zocRadius);
-        pressure += falloff * territory.strength * (insideCore ? 1.0 : 0.46);
+        pressure += falloff * territory.strength * (insideCore ? 1.0 : 0.72);
       }
     }
     return pressure;
   }
 
   private territoryMoveScore(creature: Creature, profile: SpeciesProfile, point: GridPosition): number {
-    const rivalPenalty = this.rivalTerritoryPressureAt(point, creature.species) * (profile.kind === 'carnivore' ? 0.58 : 0.16);
+    const rivalPressure = this.rivalTerritoryPressureAt(point, creature.species);
+    const rivalPenalty = rivalPressure * (profile.kind === 'carnivore' ? 0.24 : 0.16);
+    const contestDrive = profile.kind === 'carnivore' && creature.energy > 0.68 ? Math.min(rivalPressure, 1.4) * 0.22 : 0;
     if (!this.isTerritorial(profile)) {
-      return -rivalPenalty;
+      return contestDrive - rivalPenalty;
     }
 
     const territory = this.territories.get(creature.species);
     if (!territory) {
-      return -rivalPenalty;
+      return contestDrive - rivalPenalty;
     }
 
     const distance = this.distanceFromTerritory(point, territory);
     const homeScore = distance <= territory.radius
       ? clamp01(1 - distance / Math.max(1, territory.radius)) * 0.48
       : -(distance - territory.radius) * 0.28;
-    return homeScore - rivalPenalty;
+    return homeScore + contestDrive - rivalPenalty;
   }
 
   private findTerritoryPatrolPoint(origin: Creature, territory: CreatureTerritory): GridPosition {
@@ -1169,13 +1182,14 @@ export class CreatureSystem {
       const preyPressure = this.preyPressureAt(point, profile.prey, 6);
       const edgePatrol = 1 - Math.abs(distance - territory.radius * 0.58) / Math.max(1, territory.radius);
       const rivalPressure = this.rivalTerritoryPressureAt(point, origin.species);
+      const contestDrive = origin.energy > 0.64 ? rivalPressure * 0.28 : -rivalPressure * 0.12;
       const score =
         preyPressure * 0.8 +
-        edgePatrol * 0.22 +
+        edgePatrol * 0.38 +
+        contestDrive +
         cell.water * 0.08 -
         cell.heat * 0.32 -
         cell.toxicity * 0.42 -
-        rivalPressure * 0.36 -
         Math.hypot(origin.x - x, origin.y - y) * 0.025;
       if (score > bestScore) {
         bestScore = score;
@@ -1212,13 +1226,14 @@ export class CreatureSystem {
       if (!cell || !this.isWalkable(sx, sy)) {
         continue;
       }
-      let clearance = Infinity;
+      let nearestCoreGap = Infinity;
       for (const territory of this.territories.values()) {
         const distance = this.distanceFromTerritory(separated, territory);
-        clearance = Math.min(clearance, distance - (radius + TERRITORY_ZOC_BUFFER + territory.zocRadius));
+        nearestCoreGap = Math.min(nearestCoreGap, distance - (radius + territory.radius));
       }
+      const contestScore = Number.isFinite(nearestCoreGap) ? -Math.abs(nearestCoreGap - TERRITORY_CONTEST_GAP) * 0.22 : 0;
       const habitatScore = cell.terrain === 'forest' && species === 'fox' ? 0.8 : cell.terrain === 'grassland' && species === 'wolf' ? 0.7 : 0;
-      const score = (Number.isFinite(clearance) ? clearance : 20) + habitatScore + cell.grass * 0.3 - cell.heat * 0.5 - cell.toxicity * 0.7;
+      const score = contestScore + habitatScore + cell.grass * 0.3 - cell.heat * 0.5 - cell.toxicity * 0.7;
       if (score > bestScore) {
         bestScore = score;
         best = separated;
@@ -1236,7 +1251,7 @@ export class CreatureSystem {
         if (territory.species === species) {
           continue;
         }
-        const minDistance = zocRadius + territory.zocRadius;
+        const minDistance = radius + territory.radius + TERRITORY_CONTEST_GAP;
         const dx = resolved.x - territory.x;
         const dy = resolved.y - territory.y;
         const distance = Math.hypot(dx, dy);
