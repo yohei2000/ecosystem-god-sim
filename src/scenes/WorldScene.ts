@@ -1,7 +1,6 @@
 import * as Phaser from 'phaser';
 import type { Cell, CreatureEvent, CreatureSpecies, CreatureTerritory, GodPower, GridPosition, Season, Terrain, Weather } from '../types';
-import terrainAtlasUrl from '../assets/terrain-atlas.png';
-import terrainStampsUrl from '../assets/terrain-stamps.png';
+import terrainWorldUrl from '../assets/terrain-world-v2.png';
 import creatureAtlasUrl from '../assets/creature-atlas.png';
 import effectAtlasUrl from '../assets/effect-atlas.png';
 import { CreatureSystem } from '../systems/CreatureSystem';
@@ -12,13 +11,9 @@ import { UISystem } from '../systems/UISystem';
 
 const GRID_WIDTH = 122;
 const GRID_HEIGHT = 56;
-const TERRAIN_ATLAS_FRAME_SIZE = 128;
-const TERRAIN_STAMP_FRAME_SIZE = 512;
-const TERRAIN_TEXTURE_CELL_SIZE = 9;
 const CREATURE_FRAME_SIZE = 192;
 const CREATURE_MOTION_FRAMES = 4;
 const EFFECT_FRAME_SIZE = 256;
-const TERRAIN_BASE_REFRESH_SECONDS = 6.0;
 const CELL_OVERLAY_REFRESH_SECONDS = 5.0;
 const TERRITORY_OVERLAY_REFRESH_SECONDS = 0.16;
 const TERRITORY_MAP_REFRESH_SECONDS = 0.16;
@@ -36,30 +31,6 @@ interface CreatureVisual {
   animationSeed: number;
   facingLeft: boolean;
 }
-
-interface TerrainStampDefinition {
-  frame: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  alpha?: number;
-  angle?: number;
-  flipX?: boolean;
-}
-
-const TERRAIN_STAMPS: TerrainStampDefinition[] = [
-  { frame: 3, x: 0.12, y: 0.24, width: 0.24, height: 0.42, alpha: 0.94 },
-  { frame: 0, x: 0.18, y: 0.72, width: 0.23, height: 0.3, alpha: 0.96, angle: -8 },
-  { frame: 0, x: 0.36, y: 0.17, width: 0.19, height: 0.25, alpha: 0.92, flipX: true },
-  { frame: 0, x: 0.82, y: 0.2, width: 0.17, height: 0.23, alpha: 0.9, angle: 9 },
-  { frame: 2, x: 0.72, y: 0.33, width: 0.34, height: 0.34, alpha: 0.98 },
-  { frame: 2, x: 0.25, y: 0.74, width: 0.24, height: 0.24, alpha: 0.96 },
-  { frame: 4, x: 0.52, y: 0.56, width: 0.2, height: 0.23, alpha: 0.98 },
-  { frame: 1, x: 0.73, y: 0.74, width: 0.35, height: 0.29, alpha: 0.95, angle: 6 },
-  { frame: 1, x: 0.91, y: 0.53, width: 0.27, height: 0.23, alpha: 0.9, angle: -7, flipX: true },
-  { frame: 1, x: 0.88, y: 0.09, width: 0.21, height: 0.19, alpha: 0.86, angle: 4 },
-];
 
 const terrainColor: Record<Terrain, number> = {
   grassland: 0x5f9f43,
@@ -134,15 +105,8 @@ export class WorldScene extends Phaser.Scene {
   private overlayGraphics!: Phaser.GameObjects.Graphics;
   private territoryGraphics!: Phaser.GameObjects.Graphics;
   private terrainBaseImage?: Phaser.GameObjects.Image;
-  private terrainBaseCanvas?: HTMLCanvasElement;
-  private terrainBaseContext?: CanvasRenderingContext2D;
-  private terrainScratchCanvas?: HTMLCanvasElement;
-  private terrainScratchContext?: CanvasRenderingContext2D;
-  private terrainBaseTexture?: Phaser.Textures.CanvasTexture;
-  private terrainTextureTimer = 0;
   private cellOverlayTimer = 0;
   private cellOverlayDirty = true;
-  private readonly terrainStamps: Phaser.GameObjects.Image[] = [];
   private readonly creatureSprites = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureSicknessGlows = new Map<number, Phaser.GameObjects.Image>();
   private readonly creatureAlertRings = new Map<number, Phaser.GameObjects.Image>();
@@ -178,14 +142,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   preload(): void {
-    this.load.spritesheet('terrain-atlas', terrainAtlasUrl, {
-      frameWidth: TERRAIN_ATLAS_FRAME_SIZE,
-      frameHeight: TERRAIN_ATLAS_FRAME_SIZE,
-    });
-    this.load.spritesheet('terrain-stamps', terrainStampsUrl, {
-      frameWidth: TERRAIN_STAMP_FRAME_SIZE,
-      frameHeight: TERRAIN_STAMP_FRAME_SIZE,
-    });
+    this.load.image('terrain-world', terrainWorldUrl);
     this.load.spritesheet('creatures', creatureAtlasUrl, {
       frameWidth: CREATURE_FRAME_SIZE,
       frameHeight: CREATURE_FRAME_SIZE,
@@ -223,7 +180,6 @@ export class WorldScene extends Phaser.Scene {
     this.actorGraphics.setDepth(3);
     this.createTerrainBaseTexture();
     this.createMirroredCreatureTexture();
-    this.createTerrainStamps();
 
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       const grid = this.pointerToGrid(pointer.x, pointer.y);
@@ -233,7 +189,6 @@ export class WorldScene extends Phaser.Scene {
         this.cellOverlayDirty = true;
         this.actorEffectDirty = true;
         this.territoryOverlayDirty = true;
-        this.terrainTextureTimer = TERRAIN_BASE_REFRESH_SECONDS;
         this.playGodPowerEffect(power, grid);
       }
     });
@@ -300,52 +255,13 @@ export class WorldScene extends Phaser.Scene {
     this.territoryOverlayDirty = true;
     this.territoryOutlineCache.clear();
     this.syncTerrainBaseTexture();
-    this.syncTerrainStamps();
     this.renderWorld(0);
   }
 
-  private createTerrainStamps(): void {
-    for (const stamp of TERRAIN_STAMPS) {
-      const image = this.add.image(0, 0, 'terrain-stamps', stamp.frame);
-      image.setDepth(1);
-      image.setAlpha(stamp.alpha ?? 1);
-      image.setAngle(stamp.angle ?? 0);
-      image.setFlipX(stamp.flipX ?? false);
-      this.terrainStamps.push(image);
-    }
-  }
-
   private createTerrainBaseTexture(): void {
-    if (this.textures.exists('terrain-base')) {
-      this.textures.remove('terrain-base');
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = GRID_WIDTH * TERRAIN_TEXTURE_CELL_SIZE;
-    canvas.height = GRID_HEIGHT * TERRAIN_TEXTURE_CELL_SIZE;
-    const context = canvas.getContext('2d');
-    if (!context) {
-      return;
-    }
-
-    context.imageSmoothingEnabled = true;
-    const scratchCanvas = document.createElement('canvas');
-    scratchCanvas.width = canvas.width;
-    scratchCanvas.height = canvas.height;
-    const scratchContext = scratchCanvas.getContext('2d');
-    if (scratchContext) {
-      scratchContext.imageSmoothingEnabled = true;
-      this.terrainScratchCanvas = scratchCanvas;
-      this.terrainScratchContext = scratchContext;
-    }
-
-    this.terrainBaseCanvas = canvas;
-    this.terrainBaseContext = context;
-    this.terrainBaseTexture = this.textures.addCanvas('terrain-base', canvas) ?? undefined;
-    this.terrainBaseImage = this.add.image(0, 0, 'terrain-base');
+    this.terrainBaseImage = this.add.image(0, 0, 'terrain-world');
     this.terrainBaseImage.setOrigin(0, 0);
     this.terrainBaseImage.setDepth(0);
-    this.updateTerrainBaseTexture(0, true);
     this.syncTerrainBaseTexture();
   }
 
@@ -408,115 +324,6 @@ export class WorldScene extends Phaser.Scene {
       frameWidth: CREATURE_FRAME_SIZE,
       frameHeight: CREATURE_FRAME_SIZE,
     });
-  }
-
-  private syncTerrainStamps(): void {
-    const mapWidth = this.cellSize * GRID_WIDTH;
-    const mapHeight = this.cellSize * GRID_HEIGHT;
-    for (let i = 0; i < TERRAIN_STAMPS.length; i += 1) {
-      const definition = TERRAIN_STAMPS[i];
-      const image = this.terrainStamps[i];
-      if (!image) {
-        continue;
-      }
-      image.setPosition(this.mapOffsetX + definition.x * mapWidth, this.mapOffsetY + definition.y * mapHeight);
-      image.setDisplaySize(definition.width * mapWidth, definition.height * mapHeight);
-    }
-  }
-
-  private updateTerrainBaseTexture(dt: number, force = false): void {
-    if (!this.terrainBaseContext || !this.terrainBaseCanvas || !this.terrainBaseTexture) {
-      return;
-    }
-    this.terrainTextureTimer += dt;
-    if (!force && this.terrainTextureTimer < TERRAIN_BASE_REFRESH_SECONDS) {
-      return;
-    }
-    this.terrainTextureTimer = 0;
-
-    const context = this.terrainBaseContext;
-    const paintCanvas = this.terrainScratchCanvas ?? this.terrainBaseCanvas;
-    const paintContext = this.terrainScratchContext ?? context;
-    const source = this.textures.get('terrain-atlas').getSourceImage() as CanvasImageSource & {
-      width: number;
-      height: number;
-    };
-    paintContext.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
-    paintContext.fillStyle = '#5f9f43';
-    paintContext.fillRect(0, 0, paintCanvas.width, paintCanvas.height);
-
-    for (let y = 0; y < GRID_HEIGHT; y += 1) {
-      for (let x = 0; x < GRID_WIDTH; x += 1) {
-        const cell = this.environment.getCell(x, y);
-        if (!cell) {
-          continue;
-        }
-
-        const frame = this.terrainFrameForCell(cell);
-        const frameX = (frame % 4) * TERRAIN_ATLAS_FRAME_SIZE;
-        const frameY = Math.floor(frame / 4) * TERRAIN_ATLAS_FRAME_SIZE;
-        const seed = this.terrainSeed(x, y);
-        const sample = 52 + (seed % 30);
-        const sourceX = frameX + ((seed >>> 4) % Math.max(1, TERRAIN_ATLAS_FRAME_SIZE - sample));
-        const sourceY = frameY + ((seed >>> 11) % Math.max(1, TERRAIN_ATLAS_FRAME_SIZE - sample));
-        const destX = x * TERRAIN_TEXTURE_CELL_SIZE;
-        const destY = y * TERRAIN_TEXTURE_CELL_SIZE;
-
-        paintContext.drawImage(source, sourceX, sourceY, sample, sample, destX - 1, destY - 1, TERRAIN_TEXTURE_CELL_SIZE + 3, TERRAIN_TEXTURE_CELL_SIZE + 3);
-        this.tintTerrainTextureCell(paintContext, cell, destX, destY);
-      }
-    }
-
-    if (paintCanvas !== this.terrainBaseCanvas) {
-      context.clearRect(0, 0, this.terrainBaseCanvas.width, this.terrainBaseCanvas.height);
-      context.save();
-      context.filter = 'blur(2.8px)';
-      context.drawImage(paintCanvas, -4, -4, this.terrainBaseCanvas.width + 8, this.terrainBaseCanvas.height + 8);
-      context.restore();
-      context.save();
-      context.globalAlpha = 0.42;
-      context.drawImage(paintCanvas, 0, 0);
-      context.restore();
-    }
-
-    this.terrainBaseTexture.refresh();
-  }
-
-  private terrainFrameForCell(cell: Cell): number {
-    if (cell.terrain === 'forest') return 1;
-    if (cell.terrain === 'water') return 2;
-    if (cell.terrain === 'wasteland') return cell.ash > 0.34 || cell.toxicity > 0.35 ? 6 : 3;
-    if (cell.terrain === 'crater') return 4;
-    if (cell.terrain === 'mountain') return 5;
-    return cell.grass > 0.72 && cell.water > 0.32 ? 7 : 0;
-  }
-
-  private tintTerrainTextureCell(context: CanvasRenderingContext2D, cell: Cell, x: number, y: number): void {
-    const size = TERRAIN_TEXTURE_CELL_SIZE + 1;
-    if (cell.terrain !== 'water' && cell.grass > 0.42) {
-      context.fillStyle = `rgba(92, 168, 64, ${Math.min(0.22, cell.grass * 0.18)})`;
-      context.fillRect(x, y, size, size);
-    }
-    if (cell.water > 0.74 && cell.terrain !== 'water') {
-      context.fillStyle = `rgba(90, 178, 214, ${Math.min(0.22, (cell.water - 0.74) * 0.55)})`;
-      context.fillRect(x, y, size, size);
-    }
-    if (cell.heat > 0.55) {
-      context.fillStyle = `rgba(232, 95, 42, ${Math.min(0.3, cell.heat * 0.24)})`;
-      context.fillRect(x, y, size, size);
-    }
-    if (cell.ash > 0.32) {
-      context.fillStyle = `rgba(194, 184, 172, ${Math.min(0.28, cell.ash * 0.24)})`;
-      context.fillRect(x, y, size, size);
-    }
-    if (cell.toxicity > 0.34) {
-      context.fillStyle = `rgba(94, 74, 142, ${Math.min(0.22, cell.toxicity * 0.2)})`;
-      context.fillRect(x, y, size, size);
-    }
-  }
-
-  private terrainSeed(x: number, y: number): number {
-    return (Math.imul(x + 31, 73856093) ^ Math.imul(y + 47, 19349663)) >>> 0;
   }
 
   private pointerToGrid(pointerX: number, pointerY: number): GridPosition | undefined {
@@ -868,7 +675,6 @@ export class WorldScene extends Phaser.Scene {
 
     this.terrainGraphics.clear();
     this.overlayGraphics.clear();
-    this.updateTerrainBaseTexture(dt);
     this.updateCellOverlayGraphics(dt);
     this.drawTerrainBase();
 
