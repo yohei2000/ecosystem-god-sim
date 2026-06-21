@@ -14,6 +14,7 @@ import { EnvironmentSystem } from './EnvironmentSystem';
 
 const MAX_CREATURES = 420;
 const SPECIES_COUNT = 7;
+const TERRITORY_ZOC_BUFFER = 3.5;
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
 
@@ -206,7 +207,7 @@ export class CreatureSystem {
   readonly creatures: Creature[] = [];
   readonly corpses: Corpse[] = [];
   private readonly events: CreatureEvent[] = [];
-  private readonly territories = new Map<number, CreatureTerritory>();
+  private readonly territories = new Map<CreatureSpecies, CreatureTerritory>();
   private nextId = 1;
   private nextPackId = 1;
 
@@ -384,19 +385,23 @@ export class CreatureSystem {
   }
 
   private updateTerritories(dt: number): void {
-    for (const [packId, territory] of [...this.territories]) {
-      const members = this.creatures.filter((creature) => creature.packId === packId && creature.species === territory.species);
+    for (const [species, territory] of [...this.territories]) {
+      const members = this.creatures.filter((creature) => creature.species === species);
       if (members.length === 0 || speciesProfiles[territory.species].kind !== 'carnivore') {
-        this.territories.delete(packId);
+        this.territories.delete(species);
         continue;
       }
 
-      const center = this.averagePosition(members);
-      const pressure = this.rivalCarnivorePressure(territory, packId);
+      const desiredCenter = this.resolveTerritoryZoc(species, this.averagePosition(members), territory.radius);
+      const pressure = this.rivalCarnivorePressure(territory, species);
       const averageEnergy = members.reduce((sum, member) => sum + member.energy, 0) / members.length;
-      territory.x = Phaser.Math.Linear(territory.x, center.x, Math.min(1, dt * 0.18));
-      territory.y = Phaser.Math.Linear(territory.y, center.y, Math.min(1, dt * 0.18));
+      territory.x = Phaser.Math.Linear(territory.x, desiredCenter.x, Math.min(1, dt * 0.12));
+      territory.y = Phaser.Math.Linear(territory.y, desiredCenter.y, Math.min(1, dt * 0.12));
       territory.radius = speciesProfiles[territory.species].territoryRadius ?? territory.radius;
+      territory.zocRadius = territory.radius + TERRITORY_ZOC_BUFFER;
+      const separated = this.resolveTerritoryZoc(species, territory, territory.radius);
+      territory.x = separated.x;
+      territory.y = separated.y;
       territory.pressure = Phaser.Math.Linear(territory.pressure, pressure, Math.min(1, dt * 0.7));
       territory.strength = clamp01(0.32 + members.length * 0.12 + averageEnergy * 0.18 - territory.pressure * 0.1);
     }
@@ -406,13 +411,13 @@ export class CreatureSystem {
     if (!this.isTerritorial(profile)) {
       return;
     }
-    const territory = this.territories.get(creature.packId);
+    const territory = this.territories.get(creature.species);
     if (!territory) {
       return;
     }
     const distanceFromHome = Math.hypot(creature.x - territory.x, creature.y - territory.y);
     const outside = Math.max(0, distanceFromHome - territory.radius);
-    const rivalPressure = this.rivalTerritoryPressureAt(creature, creature.packId);
+    const rivalPressure = this.rivalTerritoryPressureAt(creature, creature.species);
     creature.stress = clamp01(creature.stress + (outside * 0.012 + rivalPressure * 0.035) * dt);
     if (outside > territory.radius * 0.35) {
       creature.energy = clamp(creature.energy - outside * 0.0018 * dt, 0, profile.maxEnergy);
@@ -468,7 +473,7 @@ export class CreatureSystem {
   }
 
   private updateHunter(creature: Creature): void {
-    const territory = this.territories.get(creature.packId);
+    const territory = this.territories.get(creature.species);
     if (territory && this.distanceFromTerritory(creature, territory) > territory.radius * 1.18 && creature.energy > 0.36) {
       creature.state = 'hunting';
       this.stepToward(creature, territory);
@@ -518,7 +523,7 @@ export class CreatureSystem {
 
   private seekAndHunt(creature: Creature, prey: Creature, efficiency: number): void {
     const profile = speciesProfiles[creature.species];
-    const territory = this.territories.get(creature.packId);
+    const territory = this.territories.get(creature.species);
     creature.state = 'hunting';
     this.stepToward(creature, prey);
     const caught = this.findBestPrey(creature, creature.species === 'fox' ? 1.45 : 1.75, territory);
@@ -662,7 +667,7 @@ export class CreatureSystem {
       return this.corpses.some((corpse) => Math.hypot(corpse.x - parent.x, corpse.y - parent.y) <= 15);
     }
 
-    const territory = this.isTerritorial(profile) ? this.territories.get(parent.packId) : undefined;
+    const territory = this.isTerritorial(profile) ? this.territories.get(parent.species) : undefined;
     let nearbyPrey = 0;
     for (const creature of this.creatures) {
       const distance = Math.hypot(creature.x - parent.x, creature.y - parent.y);
@@ -856,7 +861,7 @@ export class CreatureSystem {
       const herdDensity = this.herdDensityAt(prey, prey.packId, speciesProfiles[prey.species].groupRadius);
       const preyValue = speciesProfiles[prey.species].corpseNutrients;
       const homeBonus = territory ? clamp01(1 - territoryDistance / Math.max(1, territory.radius)) * 0.62 : 0;
-      const rivalPenalty = this.rivalTerritoryPressureAt(prey, origin.packId) * 0.7;
+      const rivalPenalty = this.rivalTerritoryPressureAt(prey, origin.species) * 0.7;
       const score =
         preyValue +
         (1.2 - prey.energy) * 1.2 +
@@ -995,19 +1000,33 @@ export class CreatureSystem {
     return density;
   }
 
-  private ensureTerritory(creature: Creature, profile: SpeciesProfile): void {
-    if (!this.isTerritorial(profile) || this.territories.has(creature.packId)) {
-      return;
+  private ensureTerritoryForSpecies(species: CreatureSpecies, preferredCenter?: GridPosition): CreatureTerritory | undefined {
+    const existing = this.territories.get(species);
+    if (existing) {
+      return existing;
     }
-    this.territories.set(creature.packId, {
-      packId: creature.packId,
-      species: creature.species,
-      x: creature.x,
-      y: creature.y,
-      radius: profile.territoryRadius ?? profile.groupRadius * 1.8,
+    const profile = speciesProfiles[species];
+    if (!this.isTerritorial(profile)) {
+      return undefined;
+    }
+
+    const radius = profile.territoryRadius ?? profile.groupRadius * 1.8;
+    const zocRadius = radius + TERRITORY_ZOC_BUFFER;
+    const center = preferredCenter
+      ? this.resolveTerritoryZoc(species, preferredCenter, radius)
+      : this.findTerritoryAnchor(species, radius, zocRadius);
+    const territory: CreatureTerritory = {
+      packId: this.nextPackId++,
+      species,
+      x: center.x,
+      y: center.y,
+      radius,
+      zocRadius,
       strength: 0.56,
       pressure: 0,
-    });
+    };
+    this.territories.set(species, territory);
+    return territory;
   }
 
   private isTerritorial(profile: SpeciesProfile): boolean {
@@ -1032,43 +1051,45 @@ export class CreatureSystem {
     return Math.hypot(point.x - territory.x, point.y - territory.y);
   }
 
-  private rivalCarnivorePressure(territory: CreatureTerritory, packId: number): number {
+  private rivalCarnivorePressure(territory: CreatureTerritory, ownSpecies: CreatureSpecies): number {
     let pressure = 0;
     for (const creature of this.creatures) {
       const profile = speciesProfiles[creature.species];
-      if (creature.packId === packId || profile.kind !== 'carnivore') {
+      if (creature.species === ownSpecies || profile.kind !== 'carnivore') {
         continue;
       }
       const distance = this.distanceFromTerritory(creature, territory);
-      if (distance <= territory.radius * 1.08) {
+      if (distance <= territory.zocRadius) {
         const speciesWeight = creature.species === territory.species ? 1.18 : 0.82;
-        pressure += (1 - distance / (territory.radius * 1.08)) * speciesWeight;
+        pressure += (1 - distance / Math.max(1, territory.zocRadius)) * speciesWeight;
       }
     }
     return pressure;
   }
 
-  private rivalTerritoryPressureAt(point: GridPosition, ownPackId: number): number {
+  private rivalTerritoryPressureAt(point: GridPosition, ownSpecies?: CreatureSpecies): number {
     let pressure = 0;
     for (const territory of this.territories.values()) {
-      if (territory.packId === ownPackId) {
+      if (ownSpecies && territory.species === ownSpecies) {
         continue;
       }
       const distance = this.distanceFromTerritory(point, territory);
-      if (distance <= territory.radius) {
-        pressure += (1 - distance / territory.radius) * territory.strength;
+      if (distance <= territory.zocRadius) {
+        const insideCore = distance <= territory.radius;
+        const falloff = 1 - distance / Math.max(1, territory.zocRadius);
+        pressure += falloff * territory.strength * (insideCore ? 1.0 : 0.46);
       }
     }
     return pressure;
   }
 
   private territoryMoveScore(creature: Creature, profile: SpeciesProfile, point: GridPosition): number {
-    const rivalPenalty = this.rivalTerritoryPressureAt(point, creature.packId) * (profile.kind === 'carnivore' ? 0.58 : 0.16);
+    const rivalPenalty = this.rivalTerritoryPressureAt(point, creature.species) * (profile.kind === 'carnivore' ? 0.58 : 0.16);
     if (!this.isTerritorial(profile)) {
       return -rivalPenalty;
     }
 
-    const territory = this.territories.get(creature.packId);
+    const territory = this.territories.get(creature.species);
     if (!territory) {
       return -rivalPenalty;
     }
@@ -1076,7 +1097,7 @@ export class CreatureSystem {
     const distance = this.distanceFromTerritory(point, territory);
     const homeScore = distance <= territory.radius
       ? clamp01(1 - distance / Math.max(1, territory.radius)) * 0.48
-      : -(distance - territory.radius) * 0.2;
+      : -(distance - territory.radius) * 0.28;
     return homeScore - rivalPenalty;
   }
 
@@ -1091,7 +1112,7 @@ export class CreatureSystem {
       const point = { x, y };
       const preyPressure = this.preyPressureAt(point, profile.prey, 6);
       const edgePatrol = 1 - Math.abs(distance - territory.radius * 0.58) / Math.max(1, territory.radius);
-      const rivalPressure = this.rivalTerritoryPressureAt(point, origin.packId);
+      const rivalPressure = this.rivalTerritoryPressureAt(point, origin.species);
       const score =
         preyPressure * 0.8 +
         edgePatrol * 0.22 +
@@ -1122,6 +1143,99 @@ export class CreatureSystem {
     return pressure;
   }
 
+  private findTerritoryAnchor(species: CreatureSpecies, radius: number, zocRadius: number): GridPosition {
+    let best = this.randomWalkablePointInsideZoc(zocRadius);
+    let bestScore = -Infinity;
+
+    for (let attempt = 0; attempt < 180; attempt += 1) {
+      const candidate = this.randomWalkablePointInsideZoc(zocRadius);
+      const separated = this.resolveTerritoryZoc(species, candidate, radius);
+      const sx = Math.round(separated.x);
+      const sy = Math.round(separated.y);
+      const cell = this.environment.getCell(sx, sy);
+      if (!cell || !this.isWalkable(sx, sy)) {
+        continue;
+      }
+      let clearance = Infinity;
+      for (const territory of this.territories.values()) {
+        const distance = this.distanceFromTerritory(separated, territory);
+        clearance = Math.min(clearance, distance - (radius + TERRITORY_ZOC_BUFFER + territory.zocRadius));
+      }
+      const habitatScore = cell.terrain === 'forest' && species === 'fox' ? 0.8 : cell.terrain === 'grassland' && species === 'wolf' ? 0.7 : 0;
+      const score = (Number.isFinite(clearance) ? clearance : 20) + habitatScore + cell.grass * 0.3 - cell.heat * 0.5 - cell.toxicity * 0.7;
+      if (score > bestScore) {
+        bestScore = score;
+        best = separated;
+      }
+    }
+
+    return this.resolveTerritoryZoc(species, best, radius);
+  }
+
+  private resolveTerritoryZoc(species: CreatureSpecies, point: GridPosition, radius: number): GridPosition {
+    const zocRadius = radius + TERRITORY_ZOC_BUFFER;
+    const resolved = this.keepTerritoryInsideMap(point, zocRadius);
+    for (let pass = 0; pass < 4; pass += 1) {
+      for (const territory of this.territories.values()) {
+        if (territory.species === species) {
+          continue;
+        }
+        const minDistance = zocRadius + territory.zocRadius;
+        const dx = resolved.x - territory.x;
+        const dy = resolved.y - territory.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance >= minDistance) {
+          continue;
+        }
+        const angle = distance > 0.001 ? Math.atan2(dy, dx) : Phaser.Math.FloatBetween(0, Math.PI * 2);
+        const push = minDistance - distance;
+        resolved.x += Math.cos(angle) * push;
+        resolved.y += Math.sin(angle) * push;
+        const clamped = this.keepTerritoryInsideMap(resolved, zocRadius);
+        resolved.x = clamped.x;
+        resolved.y = clamped.y;
+      }
+    }
+    return resolved;
+  }
+
+  private keepTerritoryInsideMap(point: GridPosition, zocRadius: number): GridPosition {
+    return {
+      x: clamp(point.x, zocRadius, Math.max(zocRadius, this.environment.width - 1 - zocRadius)),
+      y: clamp(point.y, zocRadius, Math.max(zocRadius, this.environment.height - 1 - zocRadius)),
+    };
+  }
+
+  private randomWalkablePointInsideZoc(zocRadius: number): GridPosition {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const x = Phaser.Math.Between(Math.ceil(zocRadius), Math.floor(this.environment.width - 1 - zocRadius));
+      const y = Phaser.Math.Between(Math.ceil(zocRadius), Math.floor(this.environment.height - 1 - zocRadius));
+      if (this.isWalkable(x, y)) {
+        return { x, y };
+      }
+    }
+    return {
+      x: clamp(this.environment.width / 2, zocRadius, this.environment.width - 1 - zocRadius),
+      y: clamp(this.environment.height / 2, zocRadius, this.environment.height - 1 - zocRadius),
+    };
+  }
+
+  private findWalkableInTerritory(territory: CreatureTerritory, innerScale: number): GridPosition | undefined {
+    const radius = Math.max(2, territory.radius * innerScale);
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      const distance = Math.sqrt(Math.random()) * radius;
+      const x = Math.round(territory.x + Math.cos(angle) * distance);
+      const y = Math.round(territory.y + Math.sin(angle) * distance);
+      if (this.isWalkable(x, y) && this.distanceFromTerritory({ x, y }, territory) <= territory.radius) {
+        return { x, y };
+      }
+    }
+    return this.isWalkable(Math.round(territory.x), Math.round(territory.y))
+      ? { x: Math.round(territory.x), y: Math.round(territory.y) }
+      : undefined;
+  }
+
   private findNearbyWalkable(origin: GridPosition, radius: number): GridPosition | undefined {
     for (let attempt = 0; attempt < 24; attempt += 1) {
       const x = clamp(origin.x + Phaser.Math.Between(-radius, radius), 0, this.environment.width - 1);
@@ -1149,13 +1263,31 @@ export class CreatureSystem {
   }
 
   private spawnCluster(species: CreatureSpecies, groups: number, perGroup: number, minEnergy: number, maxEnergy: number): void {
+    const profile = speciesProfiles[species];
+    if (this.isTerritorial(profile)) {
+      this.spawnTerritorialSpecies(species, groups * perGroup, minEnergy, maxEnergy);
+      return;
+    }
+
     for (let group = 0; group < groups; group += 1) {
       const center = this.randomWalkablePoint();
       const packId = this.nextPackId++;
       for (let i = 0; i < perGroup; i += 1) {
-        const point = this.findNearbyWalkable(center, speciesProfiles[species].kind === 'carnivore' ? 8 : 6) ?? center;
+        const point = this.findNearbyWalkable(center, profile.kind === 'carnivore' ? 8 : 6) ?? center;
         this.addCreature(species, point.x, point.y, Phaser.Math.FloatBetween(minEnergy, maxEnergy), packId);
       }
+    }
+  }
+
+  private spawnTerritorialSpecies(species: CreatureSpecies, count: number, minEnergy: number, maxEnergy: number): void {
+    const territory = this.ensureTerritoryForSpecies(species);
+    if (!territory) {
+      return;
+    }
+
+    for (let i = 0; i < count; i += 1) {
+      const point = this.findWalkableInTerritory(territory, 0.74) ?? this.findNearbyWalkable(territory, Math.floor(territory.radius * 0.65)) ?? territory;
+      this.addCreature(species, point.x, point.y, Phaser.Math.FloatBetween(minEnergy, maxEnergy), territory.packId);
     }
   }
 
@@ -1173,7 +1305,8 @@ export class CreatureSystem {
   private addCreature(species: CreatureSpecies, x: number, y: number, energy: number, packId?: number): Creature {
     const profile = speciesProfiles[species];
     const state: CreatureState = profile.kind === 'carnivore' ? 'hunting' : profile.kind === 'scavenger' ? 'scavenging' : 'foraging';
-    const resolvedPackId = packId ?? this.nextPackId++;
+    const territory = this.ensureTerritoryForSpecies(species, { x, y });
+    const resolvedPackId = territory?.packId ?? packId ?? this.nextPackId++;
     const creature: Creature = {
       id: this.nextId++,
       kind: profile.kind,
@@ -1190,7 +1323,6 @@ export class CreatureSystem {
       packId: resolvedPackId,
     };
     this.creatures.push(creature);
-    this.ensureTerritory(creature, profile);
     return creature;
   }
 

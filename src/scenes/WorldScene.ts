@@ -841,10 +841,13 @@ export class WorldScene extends Phaser.Scene {
   private drawPredatorTerritory(territory: CreatureTerritory): void {
     const center = this.gridToWorldCenter(territory);
     const radius = territory.radius * this.cellSize;
+    const zocRadius = territory.zocRadius * this.cellSize;
     const visualStyle = speciesVisual[territory.species] ?? speciesVisual.wolf;
     const alpha = Phaser.Math.Clamp(0.025 + territory.strength * 0.055 + territory.pressure * 0.016, 0.035, 0.13);
     const pulse = 0.5 + Math.sin(this.time.now * 0.003 + territory.packId) * 0.5;
 
+    this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.08), visualStyle.color, alpha * 0.34);
+    this.overlayGraphics.strokeCircle(center.x, center.y, zocRadius);
     this.overlayGraphics.fillStyle(visualStyle.color, alpha * 0.16);
     this.overlayGraphics.fillCircle(center.x, center.y, radius);
     this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.16), visualStyle.color, alpha);
@@ -867,11 +870,16 @@ export class WorldScene extends Phaser.Scene {
     for (const territory of this.creatures.getPredatorTerritories()) {
       const center = this.gridToWorldCenter(territory);
       const radius = territory.radius * this.cellSize;
+      const zocRadius = territory.zocRadius * this.cellSize;
       const visualStyle = speciesVisual[territory.species] ?? speciesVisual.wolf;
       const conflict = Phaser.Math.Clamp(territory.pressure / 2.4, 0, 1);
       const alpha = Phaser.Math.Clamp(0.12 + territory.strength * 0.14, 0.12, 0.28);
       const pulse = 0.5 + Math.sin(this.time.now * 0.004 + territory.packId) * 0.5;
 
+      this.overlayGraphics.fillStyle(visualStyle.color, alpha * 0.18);
+      this.overlayGraphics.fillCircle(center.x, center.y, zocRadius);
+      this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.18), 0xf4ecd5, 0.2);
+      this.overlayGraphics.strokeCircle(center.x, center.y, zocRadius);
       this.overlayGraphics.fillStyle(visualStyle.color, alpha);
       this.overlayGraphics.fillCircle(center.x, center.y, radius);
       this.overlayGraphics.lineStyle(Math.max(2, this.cellSize * 0.32), visualStyle.color, 0.72);

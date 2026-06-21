@@ -65,6 +65,7 @@ export interface CreatureTerritory extends GridPosition {
   packId: number;
   species: CreatureSpecies;
   radius: number;
+  zocRadius: number;
   strength: number;
   pressure: number;
 }
