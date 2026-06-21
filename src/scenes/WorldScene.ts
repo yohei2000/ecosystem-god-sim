@@ -1,6 +1,6 @@
 import * as Phaser from 'phaser';
 import type { Cell, CreatureEvent, CreatureSpecies, CreatureTerritory, GodPower, GridPosition, Season, Terrain, Weather } from '../types';
-import terrainWorldUrl from '../assets/terrain-world-v2.png';
+import terrainWorldUrl from '../assets/terrain-world-imagegen-chat.png';
 import creatureAtlasUrl from '../assets/creature-atlas.png';
 import effectAtlasUrl from '../assets/effect-atlas.png';
 import { CreatureSystem } from '../systems/CreatureSystem';
