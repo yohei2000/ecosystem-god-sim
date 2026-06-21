@@ -1,5 +1,5 @@
 import * as Phaser from 'phaser';
-import type { Cell, CreatureEvent, CreatureSpecies, GodPower, GridPosition, Season, Terrain, Weather } from '../types';
+import type { Cell, CreatureEvent, CreatureSpecies, CreatureTerritory, GodPower, GridPosition, Season, Terrain, Weather } from '../types';
 import terrainAtlasUrl from '../assets/terrain-atlas.png';
 import terrainStampsUrl from '../assets/terrain-stamps.png';
 import creatureAtlasUrl from '../assets/creature-atlas.png';
@@ -738,6 +738,7 @@ export class WorldScene extends Phaser.Scene {
     }
 
     this.drawAtmosphere(dt);
+    this.drawPredatorTerritories();
     this.drawCorpses();
     this.drawCreatures(dt);
   }
@@ -816,6 +817,32 @@ export class WorldScene extends Phaser.Scene {
         const y = this.mapOffsetY + ((i * 29 + drift * 23) % mapHeight);
         this.overlayGraphics.fillCircle(x, y, Math.max(1, this.cellSize * 0.14));
       }
+    }
+  }
+
+  private drawPredatorTerritories(): void {
+    for (const territory of this.creatures.getPredatorTerritories()) {
+      this.drawPredatorTerritory(territory);
+    }
+  }
+
+  private drawPredatorTerritory(territory: CreatureTerritory): void {
+    const center = this.gridToWorldCenter(territory);
+    const radius = territory.radius * this.cellSize;
+    const visualStyle = speciesVisual[territory.species] ?? speciesVisual.wolf;
+    const alpha = Phaser.Math.Clamp(0.025 + territory.strength * 0.055 + territory.pressure * 0.016, 0.035, 0.13);
+    const pulse = 0.5 + Math.sin(this.time.now * 0.003 + territory.packId) * 0.5;
+
+    this.overlayGraphics.fillStyle(visualStyle.color, alpha * 0.16);
+    this.overlayGraphics.fillCircle(center.x, center.y, radius);
+    this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.16), visualStyle.color, alpha);
+    this.overlayGraphics.strokeCircle(center.x, center.y, radius);
+    this.overlayGraphics.fillStyle(visualStyle.color, alpha * 1.7);
+    this.overlayGraphics.fillCircle(center.x, center.y, Math.max(2, this.cellSize * 0.38));
+
+    if (territory.pressure > 0.42) {
+      this.overlayGraphics.lineStyle(Math.max(1, this.cellSize * 0.12), 0xff705c, alpha * (0.55 + pulse * 0.55));
+      this.overlayGraphics.strokeCircle(center.x, center.y, radius * (0.9 + pulse * 0.04));
     }
   }
 

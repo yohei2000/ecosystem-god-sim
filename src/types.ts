@@ -61,6 +61,14 @@ export interface Creature extends GridPosition {
   packId: number;
 }
 
+export interface CreatureTerritory extends GridPosition {
+  packId: number;
+  species: CreatureSpecies;
+  radius: number;
+  strength: number;
+  pressure: number;
+}
+
 export interface CreatureEvent extends GridPosition {
   type: 'birth' | 'death' | 'hunt' | 'scavenge' | 'outbreak' | 'recovery';
   kind?: CreatureKind;
